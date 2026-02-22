@@ -365,7 +365,8 @@ jobs:
       # -----------------------------------------------------------------------
       - name: "success() - runs if previous steps succeeded"
         if: success()
-        run: echo "All previous steps succeeded (note: continue-on-error counts as success)"
+        run: |
+          echo "All previous steps succeeded (note: continue-on-error counts as success)"
 
       # -----------------------------------------------------------------------
       # failure() — runs only if a previous step failed
