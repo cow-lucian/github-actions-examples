@@ -1,0 +1,408 @@
+# =============================================================================
+# 06 - Other Event Triggers
+# =============================================================================
+# Demonstrates additional event triggers beyond push/PR/schedule/dispatch:
+#   - release (published) — react to new releases
+#   - issues (opened) — auto-label new issues
+#   - issue_comment (created) — slash commands in comments
+#   - watch (started) — react to stars (mostly for fun)
+#   - fork — react to repository forks
+#   - create / delete — react to branch/tag creation/deletion
+#   - workflow_run — react to another workflow completing, download artifacts
+#
+# GitHub supports 35+ webhook events. This file covers the most commonly
+# used ones beyond the core push/PR/schedule/dispatch events.
+#
+# Full list: https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows
+# =============================================================================
+
+name: "06 - Other Event Triggers"
+
+on:
+  # ---------------------------------------------------------------------------
+  # Release Events
+  # ---------------------------------------------------------------------------
+  # Triggers when a release is published, edited, deleted, etc.
+  # Most common use: deploy when a new release is published.
+  release:
+    types:
+      - published             # A release is published (including pre-release)
+      # Other types: created, edited, deleted, prereleased, released,
+      #              unpublished
+
+  # ---------------------------------------------------------------------------
+  # Issue Events
+  # ---------------------------------------------------------------------------
+  # Triggers on issue activity. Useful for automation, labeling, assignment.
+  issues:
+    types:
+      - opened                # New issue created
+      - labeled               # Label added to issue
+      # Other types: edited, deleted, transferred, pinned, unpinned,
+      #              closed, reopened, assigned, unassigned, unlabeled,
+      #              milestoned, demilestoned, locked, unlocked
+
+  # ---------------------------------------------------------------------------
+  # Issue Comment Events
+  # ---------------------------------------------------------------------------
+  # Triggers when a comment is created on an issue OR pull request.
+  # (PR comments that are NOT review comments also trigger this.)
+  issue_comment:
+    types:
+      - created               # New comment posted
+      # Other types: edited, deleted
+
+  # ---------------------------------------------------------------------------
+  # Watch (Star) Events
+  # ---------------------------------------------------------------------------
+  # Triggers when someone stars the repository.
+  # Note: This only has the 'started' type (star added, not removed).
+  watch:
+    types:
+      - started               # Someone starred the repo
+
+  # ---------------------------------------------------------------------------
+  # Fork Events
+  # ---------------------------------------------------------------------------
+  # Triggers when someone forks the repository. No activity types.
+  fork:
+
+  # ---------------------------------------------------------------------------
+  # Create / Delete Events
+  # ---------------------------------------------------------------------------
+  # Triggers when a branch or tag is created or deleted.
+  # Note: Does NOT trigger for the creation of the repository itself.
+  create:                     # Branch or tag created
+  delete:                     # Branch or tag deleted
+
+  # ---------------------------------------------------------------------------
+  # Workflow Run Events
+  # ---------------------------------------------------------------------------
+  # Triggers when another workflow run is requested, in_progress, or completed.
+  # Useful for chaining workflows, especially when the first workflow runs
+  # on pull_request (with limited permissions) and you need elevated
+  # permissions to process results.
+  workflow_run:
+    workflows:
+      - "01 - Push Event Trigger"     # Name of the workflow to react to
+    types:
+      - completed             # The workflow finished (success, failure, etc.)
+    branches:
+      - main                  # Only react to runs on these branches
+
+permissions:
+  contents: read
+  issues: write               # For auto-labeling issues
+  pull-requests: write        # For slash commands on PRs
+  actions: read               # For workflow_run artifact downloads
+
+jobs:
+  # ===========================================================================
+  # Job: on-release
+  # ===========================================================================
+  # Reacts to new releases being published.
+  on-release:
+    name: "Handle Release"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@v4
+
+      - name: Display release information
+        run: |
+          echo "============================================"
+          echo "  New Release Published"
+          echo "============================================"
+          echo ""
+          echo "Release Tag:    ${{ github.event.release.tag_name }}"
+          echo "Release Name:   ${{ github.event.release.name }}"
+          echo "Pre-release:    ${{ github.event.release.prerelease }}"
+          echo "Draft:          ${{ github.event.release.draft }}"
+          echo "Author:         ${{ github.event.release.author.login }}"
+          echo "URL:            ${{ github.event.release.html_url }}"
+          echo "Target Branch:  ${{ github.event.release.target_commitish }}"
+          echo ""
+          echo "--- Release Body ---"
+          echo "${{ github.event.release.body }}"
+
+      - name: Build and publish
+        run: |
+          echo "Building release ${{ github.event.release.tag_name }}..."
+          echo "Would publish package to registry here."
+
+  # ===========================================================================
+  # Job: auto-label-issue
+  # ===========================================================================
+  # Automatically labels new issues based on their content.
+  auto-label-issue:
+    name: "Auto-Label New Issue"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues' && github.event.action == 'opened'
+
+    steps:
+      - name: Analyze and label issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = context.payload.issue;
+            const title = issue.title.toLowerCase();
+            const body = (issue.body || '').toLowerCase();
+            const text = `${title} ${body}`;
+            const labelsToAdd = [];
+
+            // Auto-detect issue type from content
+            if (text.includes('bug') || text.includes('error') || text.includes('crash') || text.includes('broken')) {
+              labelsToAdd.push('bug');
+            }
+            if (text.includes('feature') || text.includes('enhancement') || text.includes('request')) {
+              labelsToAdd.push('enhancement');
+            }
+            if (text.includes('docs') || text.includes('documentation') || text.includes('typo')) {
+              labelsToAdd.push('documentation');
+            }
+            if (text.includes('security') || text.includes('vulnerability') || text.includes('cve')) {
+              labelsToAdd.push('security');
+            }
+            if (text.includes('performance') || text.includes('slow') || text.includes('memory')) {
+              labelsToAdd.push('performance');
+            }
+
+            // Always add 'triage' for new issues
+            labelsToAdd.push('triage');
+
+            if (labelsToAdd.length > 0) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                labels: labelsToAdd,
+              });
+              console.log(`Added labels: ${labelsToAdd.join(', ')}`);
+            }
+
+  # ===========================================================================
+  # Job: slash-commands
+  # ===========================================================================
+  # Handles slash commands in issue/PR comments.
+  # Examples: /deploy, /test, /label, /assign
+  slash-commands:
+    name: "Handle Slash Commands"
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.action == 'created' &&
+      startsWith(github.event.comment.body, '/')
+
+    steps:
+      - name: Parse and execute slash command
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = context.payload.comment;
+            const body = comment.body.trim();
+            const issueNumber = context.payload.issue.number;
+            const isPR = !!context.payload.issue.pull_request;
+
+            // Parse the command: /command arg1 arg2
+            const parts = body.split(/\s+/);
+            const command = parts[0].toLowerCase();
+            const args = parts.slice(1);
+
+            console.log(`Command: ${command}`);
+            console.log(`Args: ${args.join(', ')}`);
+            console.log(`Is PR: ${isPR}`);
+            console.log(`Author: ${comment.user.login}`);
+
+            switch (command) {
+              case '/label':
+                // /label bug enhancement
+                if (args.length > 0) {
+                  await github.rest.issues.addLabels({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    labels: args,
+                  });
+                  console.log(`Added labels: ${args.join(', ')}`);
+                }
+                break;
+
+              case '/assign':
+                // /assign username1 username2
+                if (args.length > 0) {
+                  await github.rest.issues.addAssignees({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issueNumber,
+                    assignees: args,
+                  });
+                  console.log(`Assigned: ${args.join(', ')}`);
+                }
+                break;
+
+              case '/close':
+                // /close - close the issue
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  state: 'closed',
+                });
+                console.log('Issue closed.');
+                break;
+
+              case '/help':
+                // /help - list available commands
+                const helpText = [
+                  '### Available Slash Commands',
+                  '| Command | Description |',
+                  '|---------|-------------|',
+                  '| `/label <labels...>` | Add labels to this issue/PR |',
+                  '| `/assign <users...>` | Assign users to this issue/PR |',
+                  '| `/close` | Close this issue/PR |',
+                  '| `/help` | Show this help message |',
+                ].join('\n');
+
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issueNumber,
+                  body: helpText,
+                });
+                break;
+
+              default:
+                console.log(`Unknown command: ${command}`);
+                break;
+            }
+
+  # ===========================================================================
+  # Job: on-star
+  # ===========================================================================
+  # Fun: log when someone stars the repository.
+  on-star:
+    name: "New Star"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'watch' && github.event.action == 'started'
+
+    steps:
+      - name: Log new star
+        run: |
+          echo "Repository was starred by: ${{ github.event.sender.login }}"
+          echo "Total stars: ${{ github.event.repository.stargazers_count }}"
+
+  # ===========================================================================
+  # Job: on-fork
+  # ===========================================================================
+  on-fork:
+    name: "New Fork"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'fork'
+
+    steps:
+      - name: Log fork
+        run: |
+          echo "Repository was forked!"
+          echo "Fork: ${{ github.event.forkee.full_name }}"
+          echo "Forked by: ${{ github.event.forkee.owner.login }}"
+
+  # ===========================================================================
+  # Job: on-branch-tag-lifecycle
+  # ===========================================================================
+  # Reacts to branch/tag creation and deletion.
+  on-branch-tag-lifecycle:
+    name: "Branch/Tag Lifecycle"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'create' || github.event_name == 'delete'
+
+    steps:
+      - name: Log create/delete event
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "Ref Type: ${{ github.event.ref_type }}"
+          echo "Ref: ${{ github.event.ref }}"
+
+          if [[ "${{ github.event_name }}" == "create" ]]; then
+            echo "New ${{ github.event.ref_type }} created: ${{ github.event.ref }}"
+          else
+            echo "${{ github.event.ref_type }} deleted: ${{ github.event.ref }}"
+          fi
+
+  # ===========================================================================
+  # Job: on-workflow-run
+  # ===========================================================================
+  # Reacts to completion of the "01 - Push Event Trigger" workflow.
+  # This is useful for post-processing, notifications, or artifact handling.
+  on-workflow-run:
+    name: "React to Workflow Run"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run'
+
+    steps:
+      - name: Display triggering workflow info
+        run: |
+          echo "============================================"
+          echo "  Workflow Run Event"
+          echo "============================================"
+          echo ""
+          echo "Workflow Name:    ${{ github.event.workflow_run.name }}"
+          echo "Workflow ID:      ${{ github.event.workflow_run.workflow_id }}"
+          echo "Run ID:           ${{ github.event.workflow_run.id }}"
+          echo "Run Number:       ${{ github.event.workflow_run.run_number }}"
+          echo "Status:           ${{ github.event.workflow_run.status }}"
+          echo "Conclusion:       ${{ github.event.workflow_run.conclusion }}"
+          echo "Branch:           ${{ github.event.workflow_run.head_branch }}"
+          echo "Commit SHA:       ${{ github.event.workflow_run.head_sha }}"
+          echo "Actor:            ${{ github.event.workflow_run.actor.login }}"
+          echo "Event:            ${{ github.event.workflow_run.event }}"
+          echo "URL:              ${{ github.event.workflow_run.html_url }}"
+
+      # -----------------------------------------------------------------------
+      # Download artifacts from the triggering workflow
+      # -----------------------------------------------------------------------
+      # This pattern is critical for workflows that need elevated permissions
+      # to process artifacts from pull_request workflows (which run with
+      # limited permissions for fork PRs).
+      - name: Download artifacts from triggering workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // List artifacts from the triggering workflow run
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id,
+            });
+
+            console.log(`Found ${artifacts.data.total_count} artifacts:`);
+            for (const artifact of artifacts.data.artifacts) {
+              console.log(`  - ${artifact.name} (${artifact.size_in_bytes} bytes)`);
+
+              // Download each artifact
+              const download = await github.rest.actions.downloadArtifact({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                artifact_id: artifact.id,
+                archive_format: 'zip',
+              });
+              console.log(`  Downloaded: ${artifact.name}`);
+            }
+
+      - name: Handle based on conclusion
+        run: |
+          case "${{ github.event.workflow_run.conclusion }}" in
+            "success")
+              echo "Triggering workflow succeeded! Processing results..."
+              ;;
+            "failure")
+              echo "::warning::Triggering workflow failed. Check the logs."
+              ;;
+            "cancelled")
+              echo "Triggering workflow was cancelled."
+              ;;
+            *)
+              echo "Conclusion: ${{ github.event.workflow_run.conclusion }}"
+              ;;
+          esac

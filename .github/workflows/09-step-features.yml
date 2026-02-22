@@ -1,0 +1,400 @@
+# =============================================================================
+# 09 - Step Features
+# =============================================================================
+# Demonstrates step-level features in GitHub Actions:
+#   - Step id and outputs (GITHUB_OUTPUT)
+#   - Single-line and multi-line GITHUB_OUTPUT (with delimiter)
+#   - GITHUB_ENV for setting environment variables
+#   - GITHUB_PATH for adding to PATH
+#   - Step conditionals (if with expressions)
+#   - continue-on-error with outcome/conclusion check
+#   - timeout-minutes at step level
+#   - Different shells (bash, python)
+#   - GITHUB_STEP_SUMMARY (markdown, tables)
+#   - Workflow commands (debug, warning, error, notice, group, add-mask)
+#
+# Environment Files:
+#   GITHUB_OUTPUT   → Set step outputs (replaces deprecated set-output)
+#   GITHUB_ENV      → Set environment variables for subsequent steps
+#   GITHUB_PATH     → Prepend to PATH for subsequent steps
+#   GITHUB_STEP_SUMMARY → Write markdown to the job summary
+# =============================================================================
+
+name: "09 - Step Features"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  step-features:
+    name: "Step Features Demo"
+    runs-on: ubuntu-latest
+
+    outputs:
+      final-result: ${{ steps.multi-output.outputs.json-data }}
+
+    steps:
+      # =====================================================================
+      # GITHUB_OUTPUT — Step Outputs
+      # =====================================================================
+
+      # -----------------------------------------------------------------------
+      # Single-line output
+      # -----------------------------------------------------------------------
+      - name: "GITHUB_OUTPUT: single-line values"
+        id: single-output
+        run: |
+          # Syntax: echo "key=value" >> "$GITHUB_OUTPUT"
+          # Keys can contain alphanumeric chars, hyphens, and underscores
+          echo "version=1.2.3" >> "$GITHUB_OUTPUT"
+          echo "status=success" >> "$GITHUB_OUTPUT"
+          echo "timestamp=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "commit-short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: "Read single-line outputs"
+        run: |
+          echo "Version:   ${{ steps.single-output.outputs.version }}"
+          echo "Status:    ${{ steps.single-output.outputs.status }}"
+          echo "Timestamp: ${{ steps.single-output.outputs.timestamp }}"
+          echo "Short SHA: ${{ steps.single-output.outputs.commit-short }}"
+
+      # -----------------------------------------------------------------------
+      # Multi-line output (using delimiter)
+      # -----------------------------------------------------------------------
+      - name: "GITHUB_OUTPUT: multi-line values"
+        id: multi-output
+        run: |
+          # For multi-line values, use a unique delimiter.
+          # Syntax:
+          #   echo "key<<DELIMITER" >> "$GITHUB_OUTPUT"
+          #   echo "line 1" >> "$GITHUB_OUTPUT"
+          #   echo "line 2" >> "$GITHUB_OUTPUT"
+          #   echo "DELIMITER" >> "$GITHUB_OUTPUT"
+
+          # Example 1: Multi-line text
+          echo "changelog<<EOF_CHANGELOG" >> "$GITHUB_OUTPUT"
+          echo "- Fixed bug #123" >> "$GITHUB_OUTPUT"
+          echo "- Added feature X" >> "$GITHUB_OUTPUT"
+          echo "- Updated dependency Y" >> "$GITHUB_OUTPUT"
+          echo "EOF_CHANGELOG" >> "$GITHUB_OUTPUT"
+
+          # Example 2: JSON data (common for passing structured data)
+          echo "json-data<<EOF_JSON" >> "$GITHUB_OUTPUT"
+          echo '{"status": "ok", "tests": 42, "coverage": 85.5}' >> "$GITHUB_OUTPUT"
+          echo "EOF_JSON" >> "$GITHUB_OUTPUT"
+
+          # Best practice: use a random delimiter for security
+          DELIMITER=$(openssl rand -hex 16)
+          echo "secure-output<<${DELIMITER}" >> "$GITHUB_OUTPUT"
+          echo "This uses a random delimiter" >> "$GITHUB_OUTPUT"
+          echo "to prevent injection attacks" >> "$GITHUB_OUTPUT"
+          echo "${DELIMITER}" >> "$GITHUB_OUTPUT"
+
+      - name: "Read multi-line outputs"
+        run: |
+          echo "--- Changelog ---"
+          echo "${{ steps.multi-output.outputs.changelog }}"
+          echo ""
+          echo "--- JSON Data ---"
+          echo '${{ steps.multi-output.outputs.json-data }}'
+
+      # =====================================================================
+      # GITHUB_ENV — Environment Variables
+      # =====================================================================
+
+      # -----------------------------------------------------------------------
+      # Single-line env var
+      # -----------------------------------------------------------------------
+      - name: "GITHUB_ENV: set environment variables"
+        run: |
+          # Syntax: echo "KEY=value" >> "$GITHUB_ENV"
+          # These are available in ALL subsequent steps (not the current one!)
+          echo "MY_VAR=hello-from-previous-step" >> "$GITHUB_ENV"
+          echo "BUILD_NUMBER=${{ github.run_number }}" >> "$GITHUB_ENV"
+          echo "DEPLOY_TARGET=staging" >> "$GITHUB_ENV"
+
+      # -----------------------------------------------------------------------
+      # Multi-line env var
+      # -----------------------------------------------------------------------
+      - name: "GITHUB_ENV: multi-line values"
+        run: |
+          # Same delimiter syntax as GITHUB_OUTPUT
+          echo "CONFIG_JSON<<EOF_CONFIG" >> "$GITHUB_ENV"
+          echo '{' >> "$GITHUB_ENV"
+          echo '  "database": "postgres",' >> "$GITHUB_ENV"
+          echo '  "port": 5432' >> "$GITHUB_ENV"
+          echo '}' >> "$GITHUB_ENV"
+          echo "EOF_CONFIG" >> "$GITHUB_ENV"
+
+      - name: "Read GITHUB_ENV values"
+        run: |
+          echo "MY_VAR:       $MY_VAR"
+          echo "BUILD_NUMBER: $BUILD_NUMBER"
+          echo "DEPLOY_TARGET: $DEPLOY_TARGET"
+          echo "CONFIG_JSON:  $CONFIG_JSON"
+
+      # =====================================================================
+      # GITHUB_PATH — Add to PATH
+      # =====================================================================
+      - name: "GITHUB_PATH: add to PATH"
+        run: |
+          # Syntax: echo "/path/to/add" >> "$GITHUB_PATH"
+          # Prepends the path — available in all subsequent steps
+          mkdir -p "$HOME/.local/my-tools"
+          echo '#!/bin/bash' > "$HOME/.local/my-tools/my-custom-tool"
+          echo 'echo "Custom tool executed!"' >> "$HOME/.local/my-tools/my-custom-tool"
+          chmod +x "$HOME/.local/my-tools/my-custom-tool"
+          echo "$HOME/.local/my-tools" >> "$GITHUB_PATH"
+
+      - name: "Use custom PATH entry"
+        run: |
+          # my-custom-tool is now available without full path
+          which my-custom-tool
+          my-custom-tool
+
+      # =====================================================================
+      # Step Conditionals (if)
+      # =====================================================================
+      - name: "if: always runs on main"
+        if: github.ref_name == 'main'
+        run: echo "This runs only on the main branch"
+
+      - name: "if: runs on push events only"
+        if: github.event_name == 'push'
+        run: echo "This runs only on push events"
+
+      - name: "if: complex condition"
+        if: |
+          github.event_name == 'push' &&
+          github.ref_name == 'main' &&
+          !contains(github.event.head_commit.message, '[skip ci]')
+        run: echo "Complex conditional passed"
+
+      - name: "if: using env context"
+        if: env.DEPLOY_TARGET == 'staging'
+        run: echo "Deploy target is staging"
+
+      # =====================================================================
+      # continue-on-error with outcome/conclusion
+      # =====================================================================
+      - name: "Step that may fail (allowed)"
+        id: maybe-fail
+        continue-on-error: true
+        run: |
+          echo "Attempting risky operation..."
+          # Simulate failure
+          exit 1
+
+      - name: "Check outcome vs conclusion"
+        if: always()
+        run: |
+          echo "=== outcome vs conclusion ==="
+          echo ""
+          echo "outcome:    ${{ steps.maybe-fail.outcome }}"
+          echo "conclusion: ${{ steps.maybe-fail.conclusion }}"
+          echo ""
+          echo "outcome = the ACTUAL result (success/failure/cancelled/skipped)"
+          echo "conclusion = AFTER continue-on-error is applied"
+          echo "  When continue-on-error is true and step fails:"
+          echo "    outcome = failure"
+          echo "    conclusion = success"
+
+      - name: "React to failure with continue-on-error"
+        if: steps.maybe-fail.outcome == 'failure'
+        run: |
+          echo "::warning::Step 'maybe-fail' failed, but workflow continues"
+          echo "Implementing fallback logic..."
+
+      # =====================================================================
+      # timeout-minutes (step-level)
+      # =====================================================================
+      - name: "Step with timeout"
+        timeout-minutes: 1
+        run: |
+          echo "This step has a 1-minute timeout"
+          echo "If it takes longer, it will be cancelled"
+          # In a real workflow, this prevents hung processes from blocking CI
+          sleep 2
+          echo "Finished within timeout"
+
+      # =====================================================================
+      # Different Shells
+      # =====================================================================
+
+      # -----------------------------------------------------------------------
+      # bash (default on Linux/macOS)
+      # -----------------------------------------------------------------------
+      - name: "Shell: bash"
+        shell: bash
+        run: |
+          echo "Running in bash"
+          echo "Bash version: $BASH_VERSION"
+          # bash uses 'set -eo pipefail' by default in GitHub Actions
+          # This means: fail on error, fail on pipe error
+
+      # -----------------------------------------------------------------------
+      # python
+      # -----------------------------------------------------------------------
+      - name: "Shell: python"
+        shell: python
+        run: |
+          import os
+          import json
+          import sys
+
+          print(f"Running in Python {sys.version}")
+          print(f"Repository: {os.environ['GITHUB_REPOSITORY']}")
+          print(f"Actor: {os.environ['GITHUB_ACTOR']}")
+
+          # You can write to GITHUB_OUTPUT from Python too
+          github_output = os.environ['GITHUB_OUTPUT']
+          with open(github_output, 'a') as f:
+              f.write("python-result=hello-from-python\n")
+
+          # Parse JSON env var
+          config = json.loads(os.environ.get('CONFIG_JSON', '{}'))
+          print(f"Config: {json.dumps(config, indent=2)}")
+
+      - name: "Read Python output"
+        run: |
+          echo "Python said: ${{ steps.*.outputs.python-result }}"
+
+      # =====================================================================
+      # GITHUB_STEP_SUMMARY — Job Summary with Markdown
+      # =====================================================================
+      - name: "GITHUB_STEP_SUMMARY: write markdown"
+        run: |
+          # GITHUB_STEP_SUMMARY accepts GitHub-flavored markdown.
+          # Content appears in the Actions UI job summary.
+
+          echo "## Build Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Markdown table
+          echo "### Test Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Suite | Tests | Passed | Failed | Duration |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|--------|--------|----------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Unit Tests | 150 | 148 | 2 | 12s |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Integration | 45 | 45 | 0 | 38s |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| E2E | 20 | 19 | 1 | 2m 15s |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Details/summary collapsible section
+          echo "<details>" >> "$GITHUB_STEP_SUMMARY"
+          echo "<summary>Failure Details</summary>" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "FAIL: test_user_login (tests/auth.test.js)" >> "$GITHUB_STEP_SUMMARY"
+          echo "  Expected: 200" >> "$GITHUB_STEP_SUMMARY"
+          echo "  Received: 401" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "</details>" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          # Badges/indicators
+          echo "### Status" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Build: :white_check_mark: Passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tests: :warning: 3 failures" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Coverage: 85.5%" >> "$GITHUB_STEP_SUMMARY"
+
+      # Multiple steps can append to the same summary
+      - name: "GITHUB_STEP_SUMMARY: append more"
+        run: |
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Environment" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Node.js:** $(node --version 2>/dev/null || echo 'N/A')" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Runner OS:** ${{ runner.os }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Runner Arch:** ${{ runner.arch }}" >> "$GITHUB_STEP_SUMMARY"
+
+      # =====================================================================
+      # Workflow Commands
+      # =====================================================================
+      - name: "Workflow commands: annotations"
+        run: |
+          echo "=== Workflow Commands ==="
+
+          # -----------------------------------------------------------------------
+          # Debug messages — only visible when debug logging is enabled
+          # Enable by setting the ACTIONS_RUNNER_DEBUG secret to true
+          # -----------------------------------------------------------------------
+          echo "::debug::This is a debug message — only visible with debug logging enabled"
+
+          # -----------------------------------------------------------------------
+          # Notice — informational annotation (appears in PR files and summary)
+          # -----------------------------------------------------------------------
+          echo "::notice::This is a notice annotation"
+          echo "::notice file=src/index.js,line=5,col=1::Code review note: consider adding error handling"
+          echo "::notice title=Performance::Build completed in 12 seconds"
+
+          # -----------------------------------------------------------------------
+          # Warning — warning annotation (yellow, appears in PR files and summary)
+          # -----------------------------------------------------------------------
+          echo "::warning::This is a warning"
+          echo "::warning file=src/index.js,line=10::Deprecated API usage detected"
+          echo "::warning title=Deprecation::Function greet() will be removed in v2.0"
+
+          # -----------------------------------------------------------------------
+          # Error — error annotation (red, appears in PR files and summary)
+          # -----------------------------------------------------------------------
+          # NOTE: ::error:: does NOT fail the step! Use `exit 1` to fail.
+          echo "::error::This is an error annotation (step does NOT fail automatically)"
+          echo "::error file=src/index.js,line=15,col=3,endColumn=20::Syntax error detected"
+          echo "::error title=Security::Hardcoded credentials detected"
+
+      - name: "Workflow commands: grouping"
+        run: |
+          # -----------------------------------------------------------------------
+          # Group/Endgroup — collapsible log sections in the UI
+          # -----------------------------------------------------------------------
+          echo "::group::Installing Dependencies"
+          echo "npm install express@4.18.0"
+          echo "npm install lodash@4.17.21"
+          echo "added 25 packages in 2.1s"
+          echo "::endgroup::"
+
+          echo "::group::Running Build"
+          echo "Compiling TypeScript..."
+          echo "Bundling with webpack..."
+          echo "Build output: 1.2 MB"
+          echo "::endgroup::"
+
+          echo "::group::Running Tests"
+          echo "Test suite: 150 tests"
+          echo "Passed: 150"
+          echo "Failed: 0"
+          echo "::endgroup::"
+
+      - name: "Workflow commands: masking"
+        run: |
+          # -----------------------------------------------------------------------
+          # add-mask — mask a value in all subsequent log output
+          # -----------------------------------------------------------------------
+          # Once masked, the value is replaced with *** in logs
+          MY_SECRET="super-secret-token-12345"
+          echo "::add-mask::$MY_SECRET"
+
+          # This will print *** instead of the actual value
+          echo "The secret is: $MY_SECRET"
+          echo "Even in other contexts: $MY_SECRET appears masked"
+
+          # Useful for dynamically generated secrets (API responses, etc.)
+          DYNAMIC_TOKEN="generated-at-runtime-$(date +%s)"
+          echo "::add-mask::$DYNAMIC_TOKEN"
+          echo "Dynamic token: $DYNAMIC_TOKEN"
+
+      # =====================================================================
+      # Step with 'uses' (action) vs 'run' (shell command)
+      # =====================================================================
+      - name: "Checkout (uses an action)"
+        uses: actions/checkout@v4
+        # Steps can use EITHER `uses` OR `run`, never both.
+        # `uses` references a published action.
+        # `run` executes shell commands.
+        # `with` provides inputs to actions (not applicable to `run`).

@@ -1,0 +1,16 @@
+{
+  "name": "github-actions-examples",
+  "version": "1.0.0",
+  "description": "Repository demonstrating all GitHub Actions workflow features",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "echo \"Tests passed\" && exit 0",
+    "build": "echo \"Build complete\" && exit 0",
+    "lint": "echo \"Lint passed\" && exit 0"
+  },
+  "keywords": ["github-actions", "ci", "cd", "examples"],
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {}
+}

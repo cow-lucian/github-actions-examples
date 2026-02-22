@@ -1,0 +1,422 @@
+# =============================================================================
+# 07 - Expressions and Contexts
+# =============================================================================
+# Demonstrates ALL expression features in GitHub Actions:
+#
+# CONTEXTS:
+#   - github    — event payload, repo info, actor, refs, workflow metadata
+#   - env       — environment variables set at workflow/job/step level
+#   - vars      — repository/organization/environment configuration variables
+#   - runner    — runner OS, architecture, temp/tool paths
+#   - secrets   — encrypted secrets
+#   - inputs    — workflow_dispatch / workflow_call inputs
+#   - needs     — outputs and results from dependent jobs
+#   - job       — current job status and outputs (in if conditionals)
+#   - steps     — step outputs, outcomes, and conclusions
+#   - matrix    — current matrix values
+#   - strategy   — matrix strategy info (fail-fast, job-index, etc.)
+#
+# OPERATORS:
+#   Comparison: ==, !=, >, <, >=, <=
+#   Logical:    &&, ||, !
+#   Grouping:   ()
+#
+# BUILT-IN FUNCTIONS:
+#   String:     contains(), startsWith(), endsWith(), format()
+#   JSON:       toJSON(), fromJSON()
+#   Hash:       hashFiles()
+#
+# STATUS CHECK FUNCTIONS (only valid in `if` conditionals):
+#   success()   — true if no previous step/job failed (default implicit)
+#   failure()   — true if any previous step/job failed
+#   always()    — always true; ensures step runs even on cancel/failure
+#   cancelled() — true if the workflow was cancelled
+#
+# TYPE COERCION RULES:
+#   null → 0 (number), '' (string), false (boolean)
+#   true → 1, 'true'
+#   false → 0, 'false'
+#   strings → parsed as number if possible, otherwise NaN
+#   NaN comparisons: only NaN != NaN is true
+#
+# IMPORTANT:
+#   - Expressions use ${{ }} syntax
+#   - In `if:` conditionals, the ${{ }} wrapper is OPTIONAL
+#     (GitHub auto-wraps the value in an expression)
+#   - String literals use single quotes: 'hello'
+#   - Expression results are coerced to boolean in `if:` context
+# =============================================================================
+
+name: "07 - Expressions and Contexts"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'Deployment target'
+        type: string
+        default: 'staging'
+      verbose:
+        description: 'Enable verbose output'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Workflow-level environment variables
+env:
+  APP_NAME: "my-awesome-app"
+  BUILD_CONFIG: "release"
+  WORKFLOW_LEVEL_VAR: "I am defined at the workflow level"
+
+jobs:
+  # ===========================================================================
+  # Job: contexts-demo
+  # ===========================================================================
+  contexts-demo:
+    name: "Context Exploration"
+    runs-on: ubuntu-latest
+
+    # Job-level env vars — these override workflow-level vars of the same name
+    env:
+      JOB_LEVEL_VAR: "I am defined at the job level"
+      BUILD_CONFIG: "debug"   # Overrides workflow-level BUILD_CONFIG
+
+    outputs:
+      build-result: ${{ steps.build.outputs.result }}
+      computed-value: ${{ steps.compute.outputs.value }}
+
+    steps:
+      # -----------------------------------------------------------------------
+      # github context — rich event and repository metadata
+      # -----------------------------------------------------------------------
+      - name: "Context: github"
+        run: |
+          echo "=== github context ==="
+          echo "repository:         ${{ github.repository }}"
+          echo "repository_owner:   ${{ github.repository_owner }}"
+          echo "event_name:         ${{ github.event_name }}"
+          echo "ref:                ${{ github.ref }}"
+          echo "ref_name:           ${{ github.ref_name }}"
+          echo "ref_type:           ${{ github.ref_type }}"
+          echo "sha:                ${{ github.sha }}"
+          echo "actor:              ${{ github.actor }}"
+          echo "triggering_actor:   ${{ github.triggering_actor }}"
+          echo "workflow:           ${{ github.workflow }}"
+          echo "run_id:             ${{ github.run_id }}"
+          echo "run_number:         ${{ github.run_number }}"
+          echo "run_attempt:        ${{ github.run_attempt }}"
+          echo "server_url:         ${{ github.server_url }}"
+          echo "api_url:            ${{ github.api_url }}"
+          echo "graphql_url:        ${{ github.graphql_url }}"
+          echo "workspace:          ${{ github.workspace }}"
+          echo "action:             ${{ github.action }}"
+          echo "action_path:        ${{ github.action_path }}"
+          echo "action_ref:         ${{ github.action_ref }}"
+          echo "action_repository:  ${{ github.action_repository }}"
+          echo "action_status:      ${{ github.action_status }}"
+          echo "retention_days:     ${{ github.retention_days }}"
+
+      # -----------------------------------------------------------------------
+      # env context — access environment variables as expressions
+      # -----------------------------------------------------------------------
+      - name: "Context: env"
+        env:
+          STEP_LEVEL_VAR: "I am defined at the step level"
+          BUILD_CONFIG: "test"  # Overrides job-level BUILD_CONFIG for this step
+        run: |
+          echo "=== env context ==="
+          # env context accesses the effective env var at the expression level
+          echo "APP_NAME (workflow):     ${{ env.APP_NAME }}"
+          echo "BUILD_CONFIG (step):     ${{ env.BUILD_CONFIG }}"
+          echo "JOB_LEVEL_VAR:           ${{ env.JOB_LEVEL_VAR }}"
+          echo "STEP_LEVEL_VAR:          ${{ env.STEP_LEVEL_VAR }}"
+          echo "WORKFLOW_LEVEL_VAR:      ${{ env.WORKFLOW_LEVEL_VAR }}"
+
+          # You can also use regular shell syntax for env vars
+          echo "Shell access APP_NAME:   $APP_NAME"
+
+      # -----------------------------------------------------------------------
+      # runner context — information about the runner executing the job
+      # -----------------------------------------------------------------------
+      - name: "Context: runner"
+        run: |
+          echo "=== runner context ==="
+          echo "name:        ${{ runner.name }}"
+          echo "os:          ${{ runner.os }}"
+          echo "arch:        ${{ runner.arch }}"
+          echo "temp:        ${{ runner.temp }}"
+          echo "tool_cache:  ${{ runner.tool_cache }}"
+          echo "debug:       ${{ runner.debug }}"
+          echo "environment: ${{ runner.environment }}"
+
+      # -----------------------------------------------------------------------
+      # secrets context — encrypted secrets (values are masked in logs)
+      # -----------------------------------------------------------------------
+      - name: "Context: secrets"
+        run: |
+          echo "=== secrets context ==="
+          # The GITHUB_TOKEN is always available as a secret
+          # Its value is masked (replaced with ***) in logs
+          echo "GITHUB_TOKEN exists: ${{ secrets.GITHUB_TOKEN != '' }}"
+
+          # Custom secrets would be accessed like:
+          # echo "MY_SECRET: ${{ secrets.MY_SECRET }}"
+          # echo "API_KEY: ${{ secrets.API_KEY }}"
+
+          # IMPORTANT: Never use toJSON(secrets) — it would try to dump all secrets
+
+      # -----------------------------------------------------------------------
+      # inputs context — workflow_dispatch / workflow_call inputs
+      # -----------------------------------------------------------------------
+      - name: "Context: inputs"
+        run: |
+          echo "=== inputs context ==="
+          echo "target:  ${{ inputs.target }}"
+          echo "verbose: ${{ inputs.verbose }}"
+          # inputs are empty string / false / null when not triggered by dispatch
+
+      # -----------------------------------------------------------------------
+      # Comparison operators: ==, !=, >, <, >=, <=
+      # -----------------------------------------------------------------------
+      - name: "Operators: comparison"
+        run: |
+          echo "=== Comparison Operators ==="
+          echo "== (equal):     ${{ 1 == 1 }}"
+          echo "!= (not equal): ${{ 'abc' != 'def' }}"
+          echo ">  (greater):   ${{ 10 > 5 }}"
+          echo "<  (less):      ${{ 3 < 7 }}"
+          echo ">= (gte):       ${{ 5 >= 5 }}"
+          echo "<= (lte):       ${{ 4 <= 9 }}"
+          echo ""
+          echo "String comparison: ${{ 'apple' < 'banana' }}"
+          echo "Case insensitive: ${{ 'ABC' == 'abc' }}"
+          echo "  (GitHub Actions string comparison IS case-insensitive for ==)"
+
+      # -----------------------------------------------------------------------
+      # Logical operators: &&, ||, !
+      # -----------------------------------------------------------------------
+      - name: "Operators: logical"
+        run: |
+          echo "=== Logical Operators ==="
+          echo "&& (and):  ${{ true && true }}"
+          echo "|| (or):   ${{ false || true }}"
+          echo "!  (not):  ${{ !false }}"
+          echo ""
+          echo "Combined:  ${{ (true && false) || true }}"
+          echo "Complex:   ${{ !(false || false) && true }}"
+
+      # -----------------------------------------------------------------------
+      # Built-in functions: contains, startsWith, endsWith
+      # -----------------------------------------------------------------------
+      - name: "Functions: string matching"
+        run: |
+          echo "=== String Matching Functions ==="
+          echo ""
+          echo "--- contains(search, item) ---"
+          echo "String contains:    ${{ contains('Hello World', 'World') }}"
+          echo "Array contains:     ${{ contains(github.event.*.login, 'octocat') }}"
+          # contains() is case-insensitive for strings
+          echo "Case insensitive:   ${{ contains('HELLO', 'hello') }}"
+          echo ""
+          echo "--- startsWith(string, prefix) ---"
+          echo "Starts with:        ${{ startsWith('Hello World', 'Hello') }}"
+          echo "Ref starts with:    ${{ startsWith(github.ref, 'refs/heads/') }}"
+          echo ""
+          echo "--- endsWith(string, suffix) ---"
+          echo "Ends with:          ${{ endsWith('Hello World', 'World') }}"
+          echo "File ends with:     ${{ endsWith('index.js', '.js') }}"
+
+      # -----------------------------------------------------------------------
+      # Built-in functions: format
+      # -----------------------------------------------------------------------
+      - name: "Functions: format"
+        run: |
+          echo "=== format() Function ==="
+          # format(string, replaceValue0, replaceValue1, ...)
+          # Uses {0}, {1}, etc. as placeholders
+          echo "${{ format('Hello {0}, welcome to {1}!', github.actor, github.repository) }}"
+          echo "${{ format('Build #{0} on {1}', github.run_number, github.ref_name) }}"
+          echo ""
+          # Double braces {{ and }} to escape literal braces
+          echo "${{ format('JSON: {{{0}}}', 'value') }}"
+
+      # -----------------------------------------------------------------------
+      # Built-in functions: toJSON and fromJSON
+      # -----------------------------------------------------------------------
+      - name: "Functions: toJSON and fromJSON"
+        id: json-demo
+        run: |
+          echo "=== toJSON() and fromJSON() ==="
+          echo ""
+          echo "--- toJSON: serialize to JSON string ---"
+          echo "github.event_name as JSON: ${{ toJSON(github.event_name) }}"
+          echo ""
+          # toJSON is great for debugging complex objects
+          echo "Runner context:"
+          echo '${{ toJSON(runner) }}'
+          echo ""
+
+          # fromJSON: parse a JSON string into an object/value
+          # Often used with job outputs to pass structured data between jobs
+          echo "--- fromJSON: parse JSON string ---"
+          echo "Parse boolean: ${{ fromJSON('true') }}"
+          echo "Parse number:  ${{ fromJSON('42') }}"
+          echo "Parse null:    ${{ fromJSON('null') }}"
+
+          # Practical use: create a JSON array for a dynamic matrix
+          echo 'matrix=["node-18","node-20","node-22"]' >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Built-in functions: hashFiles
+      # -----------------------------------------------------------------------
+      - name: Checkout for hashFiles demo
+        uses: actions/checkout@v4
+
+      - name: "Functions: hashFiles"
+        run: |
+          echo "=== hashFiles() Function ==="
+          # hashFiles generates a SHA-256 hash of files matching a glob pattern.
+          # It's primarily used for cache keys.
+          echo "package.json hash:     ${{ hashFiles('package.json') }}"
+          echo "All JS files hash:     ${{ hashFiles('src/**/*.js') }}"
+          echo "Multiple patterns:     ${{ hashFiles('package.json', 'package-lock.json') }}"
+          echo ""
+          # If no files match, hashFiles returns an empty string
+          echo "No match (empty):      '${{ hashFiles('nonexistent/**') }}'"
+
+      # -----------------------------------------------------------------------
+      # Ternary pattern: condition && valueIfTrue || valueIfFalse
+      # -----------------------------------------------------------------------
+      - name: "Pattern: Ternary expressions"
+        run: |
+          echo "=== Ternary Pattern ==="
+          # GitHub Actions doesn't have a ternary operator, but you can use
+          # the && / || pattern as a workaround:
+          echo "Environment: ${{ github.ref_name == 'main' && 'production' || 'staging' }}"
+          echo "Debug mode:  ${{ runner.debug == '1' && 'enabled' || 'disabled' }}"
+          echo "Event type:  ${{ github.event_name == 'push' && 'Push Event' || 'Other Event' }}"
+
+          # WARNING: The ternary pattern fails if the "true" value is falsy!
+          # For example: condition && '' || 'fallback' always returns 'fallback'
+          # because '' is falsy. Use explicit if/else steps for such cases.
+
+      # -----------------------------------------------------------------------
+      # Step output for downstream jobs
+      # -----------------------------------------------------------------------
+      - name: Simulate build
+        id: build
+        run: |
+          echo "result=success" >> "$GITHUB_OUTPUT"
+
+      - name: Compute a value
+        id: compute
+        run: |
+          echo "value=42" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # Type coercion notes
+      # -----------------------------------------------------------------------
+      - name: "Type coercion examples"
+        run: |
+          echo "=== Type Coercion ==="
+          echo ""
+          echo "--- Boolean coercion ---"
+          echo "null → false:        ${{ null == false }}"
+          echo "0 → false:           ${{ 0 == false }}"
+          echo "'' → false:          ${{ '' == false }}"
+          echo "1 → true:            ${{ 1 == true }}"
+          echo "'1' == true:         ${{ '1' == true }}"
+          echo ""
+          echo "--- Number coercion ---"
+          echo "true → 1:            ${{ true == 1 }}"
+          echo "false → 0:           ${{ false == 0 }}"
+          echo "'42' → 42:           ${{ '42' == 42 }}"
+          echo ""
+          echo "--- String coercion in expressions ---"
+          echo "Expressions always return strings in outputs"
+          echo "Use fromJSON() to get actual booleans/numbers"
+
+  # ===========================================================================
+  # Job: status-functions-demo
+  # ===========================================================================
+  # Demonstrates status check functions: success(), failure(), always(), cancelled()
+  status-functions-demo:
+    name: "Status Functions"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Step that succeeds
+        id: step-ok
+        run: echo "This step succeeds"
+
+      - name: Step that fails (allowed)
+        id: step-fail
+        continue-on-error: true
+        run: |
+          echo "This step will fail..."
+          exit 1
+
+      # -----------------------------------------------------------------------
+      # success() — default behavior, runs only if all previous steps succeeded
+      # -----------------------------------------------------------------------
+      - name: "success() - runs if previous steps succeeded"
+        if: success()
+        run: echo "All previous steps succeeded (note: continue-on-error counts as success)"
+
+      # -----------------------------------------------------------------------
+      # failure() — runs only if a previous step failed
+      # -----------------------------------------------------------------------
+      - name: "failure() - runs if a previous step failed"
+        if: failure()
+        run: echo "A previous step failed (but only REAL failures, not continue-on-error)"
+
+      # -----------------------------------------------------------------------
+      # always() — ALWAYS runs, even on failure or cancellation
+      # -----------------------------------------------------------------------
+      - name: "always() - always runs (cleanup)"
+        if: always()
+        run: |
+          echo "This ALWAYS runs — use for cleanup tasks"
+          echo "Step 'step-ok' outcome:   ${{ steps.step-ok.outcome }}"
+          echo "Step 'step-fail' outcome: ${{ steps.step-fail.outcome }}"
+          echo "Step 'step-fail' conclusion: ${{ steps.step-fail.conclusion }}"
+          # outcome = the actual result (success/failure)
+          # conclusion = after continue-on-error is applied (success if continue-on-error)
+
+      # -----------------------------------------------------------------------
+      # cancelled() — runs only if the workflow was cancelled
+      # -----------------------------------------------------------------------
+      - name: "cancelled() - runs only on cancellation"
+        if: cancelled()
+        run: echo "Workflow was cancelled — use for cleanup on cancel"
+
+      # -----------------------------------------------------------------------
+      # Combining status functions with other conditions
+      # -----------------------------------------------------------------------
+      - name: "Combined: always() with condition"
+        if: always() && steps.step-fail.outcome == 'failure'
+        run: echo "Step 'step-fail' actually failed, running error handler"
+
+  # ===========================================================================
+  # Job: needs-context-demo
+  # ===========================================================================
+  # Demonstrates the needs context for accessing outputs from dependent jobs.
+  needs-context-demo:
+    name: "Needs Context"
+    runs-on: ubuntu-latest
+    needs: contexts-demo
+
+    steps:
+      - name: Access outputs from contexts-demo job
+        run: |
+          echo "=== needs context ==="
+          echo "Build result:   ${{ needs.contexts-demo.outputs.build-result }}"
+          echo "Computed value: ${{ needs.contexts-demo.outputs.computed-value }}"
+          echo "Job result:     ${{ needs.contexts-demo.result }}"
+          echo ""
+          echo "Full needs JSON:"
+          echo '${{ toJSON(needs) }}'

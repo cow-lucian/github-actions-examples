@@ -1,0 +1,205 @@
+# =============================================================================
+# 01 - Push Event Trigger
+# =============================================================================
+# Demonstrates the `push` event trigger with:
+#   - Branch filters using glob patterns and negation
+#   - Tag filters for release workflows
+#   - Path filters to only run when specific files change
+#   - paths-ignore (mutually exclusive with paths)
+#   - Accessing push event context information
+#
+# The push event fires when commits are pushed to a branch or when tags
+# are created/updated. It does NOT fire for pushes to forks.
+#
+# Key concepts:
+#   - `branches` and `branches-ignore` are mutually exclusive
+#   - `paths` and `paths-ignore` are mutually exclusive
+#   - `tags` and `tags-ignore` are mutually exclusive
+#   - Glob patterns: * (single segment), ** (multi-segment), ? (single char)
+#   - Negation with ! (must have at least one positive pattern first)
+# =============================================================================
+
+name: "01 - Push Event Trigger"
+
+on:
+  push:
+    # -------------------------------------------------------------------------
+    # Branch Filters
+    # -------------------------------------------------------------------------
+    # Only trigger on pushes to these branches.
+    # Patterns are matched against refs/heads/<branch_name>.
+    branches:
+      - main                    # Exact match: only the 'main' branch
+      - develop                 # Exact match: only the 'develop' branch
+      - 'release/**'            # Glob: matches release/1.0, release/2.0/beta, etc.
+      - 'feature/*'             # Glob: matches feature/login but NOT feature/auth/oauth
+      - 'hotfix/**'             # Glob: matches any hotfix branch at any depth
+      - '!release/**/beta'      # Negation: exclude beta release branches
+      #                           (negation requires at least one positive pattern above)
+
+    # IMPORTANT: `branches-ignore` is mutually exclusive with `branches`.
+    # Uncomment below and comment out `branches` above to use instead:
+    # branches-ignore:
+    #   - 'temp/**'             # Ignore all temp branches
+    #   - 'wip-*'               # Ignore work-in-progress branches
+    #   - 'dependabot/**'       # Ignore dependabot auto-branches
+
+    # -------------------------------------------------------------------------
+    # Tag Filters
+    # -------------------------------------------------------------------------
+    # Only trigger on pushes that create/update these tags.
+    # Patterns are matched against refs/tags/<tag_name>.
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'    # Semantic version tags: v1.0.0, v2.3.14
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'  # Pre-release tags: v1.0.0-alpha, v2.0.0-rc.1
+      - '!v0.*'                      # Negation: exclude v0.x.x pre-1.0 tags
+
+    # IMPORTANT: `tags-ignore` is mutually exclusive with `tags`.
+    # Uncomment below and comment out `tags` above to use instead:
+    # tags-ignore:
+    #   - 'test-*'              # Ignore test tags
+    #   - 'nightly-*'           # Ignore nightly build tags
+
+    # -------------------------------------------------------------------------
+    # Path Filters
+    # -------------------------------------------------------------------------
+    # Only trigger when files matching these patterns are changed in the push.
+    # This is extremely useful for monorepos or skipping CI on doc-only changes.
+    paths:
+      - 'src/**'                # Any file under src/
+      - 'package.json'          # The package.json file
+      - 'package-lock.json'     # The lockfile
+      - '*.js'                  # Any JS file in the root
+      - '!src/**/*.test.js'     # Negation: exclude test files from triggering
+      - '.github/workflows/01-push-trigger.yml'  # This workflow file itself
+
+    # IMPORTANT: `paths-ignore` is mutually exclusive with `paths`.
+    # Uncomment below and comment out `paths` above to use instead:
+    # paths-ignore:
+    #   - '**/*.md'             # Ignore all markdown files
+    #   - 'docs/**'             # Ignore the docs directory
+    #   - '.gitignore'          # Ignore gitignore changes
+    #   - 'LICENSE'             # Ignore license changes
+    #   - '.vscode/**'          # Ignore VS Code settings
+
+# ---------------------------------------------------------------------------
+# Permissions - principle of least privilege
+# ---------------------------------------------------------------------------
+permissions:
+  contents: read              # Required to checkout the repository
+
+jobs:
+  # ===========================================================================
+  # Job: show-push-context
+  # ===========================================================================
+  # Demonstrates accessing the rich event context available during push events.
+  show-push-context:
+    name: "Display Push Event Context"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # fetch-depth: 0 fetches all history; useful for comparing commits
+          # Default is 1 (shallow clone), which is faster for most CI builds
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # Push event context fields
+      # -----------------------------------------------------------------------
+      - name: Display push event information
+        run: |
+          echo "============================================"
+          echo "  Push Event Context"
+          echo "============================================"
+          echo ""
+          echo "--- Repository Info ---"
+          echo "Repository:       ${{ github.repository }}"
+          echo "Repository Owner: ${{ github.repository_owner }}"
+          echo "Default Branch:   ${{ github.event.repository.default_branch }}"
+          echo ""
+          echo "--- Push Details ---"
+          echo "Ref:              ${{ github.ref }}"
+          echo "Ref Name:         ${{ github.ref_name }}"
+          echo "Ref Type:         ${{ github.ref_type }}"
+          echo "SHA:              ${{ github.sha }}"
+          echo "Short SHA:        ${GITHUB_SHA::7}"
+          echo "Before SHA:       ${{ github.event.before }}"
+          echo "After SHA:        ${{ github.event.after }}"
+          echo "Forced:           ${{ github.event.forced }}"
+          echo "Created:          ${{ github.event.created }}"
+          echo "Deleted:          ${{ github.event.deleted }}"
+          echo ""
+          echo "--- Pusher Info ---"
+          echo "Pusher Name:      ${{ github.event.pusher.name }}"
+          echo "Pusher Email:     ${{ github.event.pusher.email }}"
+          echo "Actor:            ${{ github.actor }}"
+          echo "Triggering Actor: ${{ github.triggering_actor }}"
+          echo ""
+          echo "--- Workflow Info ---"
+          echo "Workflow:         ${{ github.workflow }}"
+          echo "Run ID:           ${{ github.run_id }}"
+          echo "Run Number:       ${{ github.run_number }}"
+          echo "Run Attempt:      ${{ github.run_attempt }}"
+          echo ""
+          echo "--- Commit Info ---"
+          echo "Head Commit ID:      ${{ github.event.head_commit.id }}"
+          echo "Head Commit Message: ${{ github.event.head_commit.message }}"
+          echo "Head Commit Author:  ${{ github.event.head_commit.author.name }}"
+          echo "Head Commit Time:    ${{ github.event.head_commit.timestamp }}"
+          echo ""
+          echo "--- Commits in Push ---"
+          echo "Number of commits: ${{ toJSON(github.event.commits.*.id) }}"
+
+      # -----------------------------------------------------------------------
+      # Branch vs Tag detection
+      # -----------------------------------------------------------------------
+      - name: Detect if push is a branch or tag
+        run: |
+          if [[ "${{ github.ref }}" == refs/heads/* ]]; then
+            echo "This push is to a BRANCH: ${{ github.ref_name }}"
+          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            echo "This push is a TAG: ${{ github.ref_name }}"
+          fi
+
+      # -----------------------------------------------------------------------
+      # Show changed files using git
+      # -----------------------------------------------------------------------
+      - name: List changed files
+        run: |
+          echo "Files changed in this push:"
+          # Compare the before and after commits
+          # On first push (created=true), before SHA is all zeros
+          if [[ "${{ github.event.before }}" == "0000000000000000000000000000000000000000" ]]; then
+            echo "(New branch - listing files in head commit)"
+            git diff-tree --no-commit-id --name-status -r ${{ github.sha }}
+          else
+            git diff --name-status ${{ github.event.before }} ${{ github.sha }}
+          fi
+
+  # ===========================================================================
+  # Job: build-on-push
+  # ===========================================================================
+  # A typical build job that runs on push events.
+  build-on-push:
+    name: "Build"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run build
+        run: npm run build
+
+      - name: Run tests
+        run: npm test

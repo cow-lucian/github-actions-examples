@@ -1,0 +1,292 @@
+# =============================================================================
+# 03 - Schedule (Cron) Trigger
+# =============================================================================
+# Demonstrates the `schedule` event trigger with:
+#   - Multiple cron schedules
+#   - Cron syntax explanation
+#   - Using `github.event.schedule` to differentiate triggers
+#   - Creating an issue on failure pattern
+#   - Stale issue/PR cleanup patterns
+#
+# IMPORTANT NOTES about scheduled workflows:
+#   - Scheduled workflows run on the DEFAULT branch only (usually main)
+#   - They may be delayed during periods of high GitHub Actions load
+#   - The shortest interval is every 5 minutes (GitHub may throttle further)
+#   - Scheduled workflows are automatically disabled after 60 days of repo
+#     inactivity (no pushes). Any commit to the repo re-enables them.
+#   - The `github.actor` for scheduled runs is the user who last modified
+#     the workflow file.
+#   - Scheduled workflows cannot be triggered from forked repos.
+#
+# Cron Syntax Reference:
+#   ┌───────────── minute (0-59)
+#   │ ┌───────────── hour (0-23)
+#   │ │ ┌───────────── day of month (1-31)
+#   │ │ │ ┌───────────── month (1-12 or JAN-DEC)
+#   │ │ │ │ ┌───────────── day of week (0-6 or SUN-SAT)
+#   │ │ │ │ │
+#   * * * * *
+#
+# Special characters:
+#   *     = any value
+#   ,     = list separator (e.g., 1,3,5)
+#   -     = range (e.g., 1-5)
+#   /     = step (e.g., */15 = every 15 units)
+#
+# All times are in UTC.
+# =============================================================================
+
+name: "03 - Schedule Trigger"
+
+on:
+  schedule:
+    # -------------------------------------------------------------------------
+    # Schedule 1: Nightly build at 2:00 AM UTC (Monday-Friday)
+    # -------------------------------------------------------------------------
+    - cron: '0 2 * * 1-5'
+    #         │ │ │ │ └── Day of week: 1-5 (Monday through Friday)
+    #         │ │ │ └──── Month: * (every month)
+    #         │ │ └────── Day of month: * (every day)
+    #         │ └──────── Hour: 2 (2 AM UTC)
+    #         └────────── Minute: 0
+
+    # -------------------------------------------------------------------------
+    # Schedule 2: Weekly dependency audit on Sundays at midnight UTC
+    # -------------------------------------------------------------------------
+    - cron: '0 0 * * 0'
+    #         │ │ │ │ └── Day of week: 0 (Sunday)
+    #         │ │ │ └──── Month: * (every month)
+    #         │ │ └────── Day of month: * (every day — ignored when day of week is set)
+    #         │ └──────── Hour: 0 (midnight UTC)
+    #         └────────── Minute: 0
+
+    # -------------------------------------------------------------------------
+    # Schedule 3: Monthly cleanup on the 1st at 6:00 AM UTC
+    # -------------------------------------------------------------------------
+    - cron: '0 6 1 * *'
+    #         │ │ │ │ └── Day of week: * (any)
+    #         │ │ │ └──── Month: * (every month)
+    #         │ │ └────── Day of month: 1 (first of the month)
+    #         │ └──────── Hour: 6 (6 AM UTC)
+    #         └────────── Minute: 0
+
+  # Also allow manual triggering for testing
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write             # Required to create issues on failure
+
+jobs:
+  # ===========================================================================
+  # Job: identify-schedule
+  # ===========================================================================
+  # Uses github.event.schedule to determine which cron triggered the run.
+  identify-schedule:
+    name: "Identify Schedule"
+    runs-on: ubuntu-latest
+
+    outputs:
+      schedule-type: ${{ steps.identify.outputs.type }}
+
+    steps:
+      - name: Identify which schedule triggered this run
+        id: identify
+        run: |
+          echo "Schedule value: '${{ github.event.schedule }}'"
+          echo "Event name: '${{ github.event_name }}'"
+
+          # github.event.schedule contains the cron expression that triggered this run.
+          # For workflow_dispatch, it will be empty.
+          case "${{ github.event.schedule }}" in
+            "0 2 * * 1-5")
+              echo "type=nightly-build" >> "$GITHUB_OUTPUT"
+              echo "Triggered by: Nightly build schedule (weekdays 2 AM UTC)"
+              ;;
+            "0 0 * * 0")
+              echo "type=weekly-audit" >> "$GITHUB_OUTPUT"
+              echo "Triggered by: Weekly dependency audit (Sunday midnight UTC)"
+              ;;
+            "0 6 1 * *")
+              echo "type=monthly-cleanup" >> "$GITHUB_OUTPUT"
+              echo "Triggered by: Monthly cleanup (1st of month, 6 AM UTC)"
+              ;;
+            "")
+              echo "type=manual" >> "$GITHUB_OUTPUT"
+              echo "Triggered manually via workflow_dispatch"
+              ;;
+            *)
+              echo "type=unknown" >> "$GITHUB_OUTPUT"
+              echo "Unknown schedule: ${{ github.event.schedule }}"
+              ;;
+          esac
+
+  # ===========================================================================
+  # Job: nightly-build
+  # ===========================================================================
+  nightly-build:
+    name: "Nightly Build"
+    runs-on: ubuntu-latest
+    needs: identify-schedule
+    if: needs.identify-schedule.outputs.schedule-type == 'nightly-build' || needs.identify-schedule.outputs.schedule-type == 'manual'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Run build
+        run: npm run build
+
+  # ===========================================================================
+  # Job: weekly-audit
+  # ===========================================================================
+  weekly-audit:
+    name: "Weekly Dependency Audit"
+    runs-on: ubuntu-latest
+    needs: identify-schedule
+    if: needs.identify-schedule.outputs.schedule-type == 'weekly-audit' || needs.identify-schedule.outputs.schedule-type == 'manual'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run npm audit
+        id: audit
+        run: |
+          # Capture audit output; npm audit returns non-zero if vulnerabilities found
+          npm audit --production 2>&1 | tee audit-results.txt || true
+          if npm audit --production 2>/dev/null; then
+            echo "has-vulnerabilities=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has-vulnerabilities=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Check for outdated packages
+        run: npm outdated || true
+
+  # ===========================================================================
+  # Job: monthly-cleanup
+  # ===========================================================================
+  monthly-cleanup:
+    name: "Monthly Cleanup"
+    runs-on: ubuntu-latest
+    needs: identify-schedule
+    if: needs.identify-schedule.outputs.schedule-type == 'monthly-cleanup' || needs.identify-schedule.outputs.schedule-type == 'manual'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check for stale branches
+        run: |
+          echo "Checking for branches with no activity in the last 90 days..."
+          echo "(In a real workflow, you would use the GitHub API to list and optionally delete stale branches)"
+
+      - name: Generate monthly report
+        run: |
+          echo "## Monthly Cleanup Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Date:** $(date -u +%Y-%m-%d)" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Repository:** ${{ github.repository }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Stale branches checked:** Yes" >> "$GITHUB_STEP_SUMMARY"
+
+  # ===========================================================================
+  # Job: create-issue-on-failure
+  # ===========================================================================
+  # Pattern: Create a GitHub issue when a scheduled job fails.
+  # This ensures someone is notified even without PR/push context.
+  create-issue-on-failure:
+    name: "Create Issue on Failure"
+    runs-on: ubuntu-latest
+    needs: [nightly-build, weekly-audit, monthly-cleanup]
+
+    # `always()` ensures this runs even if previous jobs failed.
+    # We then check if any of the needed jobs actually failed.
+    if: |
+      always() &&
+      (needs.nightly-build.result == 'failure' ||
+       needs.weekly-audit.result == 'failure' ||
+       needs.monthly-cleanup.result == 'failure')
+
+    steps:
+      - name: Determine which job failed
+        id: failure-info
+        run: |
+          FAILED_JOBS=""
+          if [[ "${{ needs.nightly-build.result }}" == "failure" ]]; then
+            FAILED_JOBS="${FAILED_JOBS}nightly-build, "
+          fi
+          if [[ "${{ needs.weekly-audit.result }}" == "failure" ]]; then
+            FAILED_JOBS="${FAILED_JOBS}weekly-audit, "
+          fi
+          if [[ "${{ needs.monthly-cleanup.result }}" == "failure" ]]; then
+            FAILED_JOBS="${FAILED_JOBS}monthly-cleanup, "
+          fi
+          # Remove trailing comma and space
+          FAILED_JOBS="${FAILED_JOBS%, }"
+          echo "failed-jobs=${FAILED_JOBS}" >> "$GITHUB_OUTPUT"
+
+      - name: Create failure issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = `Scheduled workflow failure: ${new Date().toISOString().split('T')[0]}`;
+            const body = [
+              '## Scheduled Workflow Failure',
+              '',
+              `**Workflow:** ${context.workflow}`,
+              `**Run:** [#${context.runNumber}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})`,
+              `**Schedule:** \`${{ github.event.schedule }}\``,
+              `**Failed jobs:** ${{ steps.failure-info.outputs.failed-jobs }}`,
+              '',
+              'Please investigate and fix the issue.',
+            ].join('\n');
+
+            // Check if a similar issue already exists (avoid duplicates)
+            const { data: existingIssues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: 'scheduled-failure',
+              per_page: 5,
+            });
+
+            if (existingIssues.length > 0) {
+              // Comment on the existing issue instead
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssues[0].number,
+                body: body,
+              });
+              console.log(`Commented on existing issue #${existingIssues[0].number}`);
+            } else {
+              // Create a new issue
+              const { data: issue } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: title,
+                body: body,
+                labels: ['bug', 'scheduled-failure'],
+              });
+              console.log(`Created issue #${issue.number}`);
+            }

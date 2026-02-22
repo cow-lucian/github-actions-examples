@@ -1,0 +1,235 @@
+# =============================================================================
+# 05 - Repository Dispatch Trigger
+# =============================================================================
+# Demonstrates the `repository_dispatch` event trigger with:
+#   - Multiple event types
+#   - Accessing client_payload data
+#   - Routing different event types to different jobs
+#   - API call examples for triggering
+#
+# `repository_dispatch` enables external systems (CI/CD tools, microservices,
+# webhooks, chatbots) to trigger workflows via the GitHub API.
+#
+# Unlike `workflow_dispatch`, repository_dispatch:
+#   - Can be triggered by external systems without GitHub UI access
+#   - Supports arbitrary JSON payloads (client_payload)
+#   - Always runs on the default branch
+#   - Can trigger multiple workflows if they listen for the same event type
+#
+# -------------------------------------------------------------------------
+# How to trigger via API:
+# -------------------------------------------------------------------------
+#
+# Using curl:
+#   curl -X POST \
+#     -H "Accept: application/vnd.github+json" \
+#     -H "Authorization: Bearer $GITHUB_TOKEN" \
+#     -H "X-GitHub-Api-Version: 2022-11-28" \
+#     https://api.github.com/repos/OWNER/REPO/dispatches \
+#     -d '{
+#       "event_type": "deploy-request",
+#       "client_payload": {
+#         "environment": "production",
+#         "version": "2.1.0",
+#         "requester": "deploy-bot",
+#         "commit_sha": "abc123def456",
+#         "rollback": false
+#       }
+#     }'
+#
+# Using gh CLI:
+#   gh api repos/OWNER/REPO/dispatches \
+#     -f event_type="deploy-request" \
+#     -f 'client_payload[environment]=production' \
+#     -f 'client_payload[version]=2.1.0'
+#
+# From another workflow:
+#   - name: Trigger repository dispatch
+#     uses: peter-evans/repository-dispatch@v3
+#     with:
+#       token: ${{ secrets.PAT_TOKEN }}
+#       event-type: deploy-request
+#       client-payload: '{"environment": "staging", "version": "1.0.0"}'
+#
+# -------------------------------------------------------------------------
+# NOTE: The GITHUB_TOKEN does NOT work for triggering repository_dispatch.
+# You need a Personal Access Token (PAT) or GitHub App token with
+# `repo` scope (classic PAT) or `contents: write` (fine-grained PAT).
+# -------------------------------------------------------------------------
+# =============================================================================
+
+name: "05 - Repository Dispatch"
+
+on:
+  repository_dispatch:
+    # -------------------------------------------------------------------------
+    # Event Types
+    # -------------------------------------------------------------------------
+    # Filter which event_type values trigger this workflow.
+    # If omitted, ALL repository_dispatch events trigger the workflow.
+    types:
+      - deploy-request        # External deployment requests
+      - run-tests             # External test trigger (e.g., from another repo)
+      - webhook-received      # Incoming webhook from external service
+      - cache-purge           # Request to purge CDN/application cache
+
+permissions:
+  contents: read
+  deployments: write
+  statuses: write
+
+jobs:
+  # ===========================================================================
+  # Job: log-dispatch
+  # ===========================================================================
+  # Always runs to log the dispatch event details.
+  log-dispatch:
+    name: "Log Dispatch Event"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Display dispatch information
+        run: |
+          echo "============================================"
+          echo "  Repository Dispatch Event"
+          echo "============================================"
+          echo ""
+          echo "Event Type:     ${{ github.event.action }}"
+          echo "Sender:         ${{ github.event.sender.login }}"
+          echo ""
+          echo "--- Client Payload ---"
+          echo '${{ toJSON(github.event.client_payload) }}'
+          echo ""
+          echo "## Repository Dispatch" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Field | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Event Type** | \`${{ github.event.action }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Sender** | @${{ github.event.sender.login }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| **Payload** | \`${{ toJSON(github.event.client_payload) }}\` |" >> "$GITHUB_STEP_SUMMARY"
+
+  # ===========================================================================
+  # Job: handle-deploy
+  # ===========================================================================
+  # Handles the 'deploy-request' event type.
+  handle-deploy:
+    name: "Handle Deploy Request"
+    runs-on: ubuntu-latest
+    if: github.event.action == 'deploy-request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate payload
+        id: validate
+        run: |
+          # Access client_payload fields
+          ENVIRONMENT='${{ github.event.client_payload.environment }}'
+          VERSION='${{ github.event.client_payload.version }}'
+          REQUESTER='${{ github.event.client_payload.requester }}'
+          ROLLBACK='${{ github.event.client_payload.rollback }}'
+
+          echo "Environment: $ENVIRONMENT"
+          echo "Version:     $VERSION"
+          echo "Requester:   $REQUESTER"
+          echo "Rollback:    $ROLLBACK"
+
+          # Validate required fields
+          if [[ -z "$ENVIRONMENT" || -z "$VERSION" ]]; then
+            echo "::error::Missing required payload fields: environment and version"
+            exit 1
+          fi
+
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "is-rollback=$ROLLBACK" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy
+        run: |
+          echo "Deploying version ${{ steps.validate.outputs.version }} to ${{ steps.validate.outputs.environment }}..."
+          if [[ "${{ steps.validate.outputs.is-rollback }}" == "true" ]]; then
+            echo "::warning::This is a ROLLBACK deployment"
+          fi
+          echo "Deployment triggered by external system complete."
+
+  # ===========================================================================
+  # Job: handle-tests
+  # ===========================================================================
+  # Handles the 'run-tests' event type.
+  handle-tests:
+    name: "Handle Test Request"
+    runs-on: ubuntu-latest
+    if: github.event.action == 'run-tests'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          # Optionally checkout a specific commit from the payload
+          ref: ${{ github.event.client_payload.commit_sha || github.sha }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ github.event.client_payload.node_version || '20' }}
+
+      - name: Install and test
+        run: |
+          npm install
+          echo "Running test suite: ${{ github.event.client_payload.test_suite || 'all' }}"
+          npm test
+
+      - name: Report results
+        run: |
+          echo "Test results would be posted back to the requesting system."
+          echo "Callback URL: ${{ github.event.client_payload.callback_url || 'none' }}"
+
+  # ===========================================================================
+  # Job: handle-webhook
+  # ===========================================================================
+  # Handles the 'webhook-received' event type from external services.
+  handle-webhook:
+    name: "Handle Webhook"
+    runs-on: ubuntu-latest
+    if: github.event.action == 'webhook-received'
+
+    steps:
+      - name: Process webhook payload
+        run: |
+          echo "Processing webhook from: ${{ github.event.client_payload.source }}"
+          echo "Webhook event: ${{ github.event.client_payload.event }}"
+          echo "Timestamp: ${{ github.event.client_payload.timestamp }}"
+          echo ""
+          echo "Full payload:"
+          echo '${{ toJSON(github.event.client_payload) }}'
+
+      - name: Route based on webhook source
+        run: |
+          SOURCE='${{ github.event.client_payload.source }}'
+          case "$SOURCE" in
+            "stripe")
+              echo "Processing Stripe webhook..."
+              ;;
+            "slack")
+              echo "Processing Slack webhook..."
+              ;;
+            *)
+              echo "Unknown webhook source: $SOURCE"
+              ;;
+          esac
+
+  # ===========================================================================
+  # Job: handle-cache-purge
+  # ===========================================================================
+  handle-cache-purge:
+    name: "Handle Cache Purge"
+    runs-on: ubuntu-latest
+    if: github.event.action == 'cache-purge'
+
+    steps:
+      - name: Purge cache
+        run: |
+          echo "Purging cache..."
+          echo "Target: ${{ github.event.client_payload.target || 'all' }}"
+          echo "Region: ${{ github.event.client_payload.region || 'global' }}"
+          echo "Cache purge complete."

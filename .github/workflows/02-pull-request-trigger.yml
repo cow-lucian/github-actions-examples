@@ -1,0 +1,262 @@
+# =============================================================================
+# 02 - Pull Request Event Trigger
+# =============================================================================
+# Demonstrates the `pull_request` event trigger with:
+#   - All activity types (opened, synchronize, reopened, etc.)
+#   - Branch and path filters
+#   - Skipping draft PRs with `if` conditionals
+#   - PR context fields (number, title, labels, etc.)
+#   - Label-conditional deploy preview job
+#   - Security notes about pull_request vs pull_request_target
+#
+# IMPORTANT SECURITY NOTE:
+#   `pull_request` runs in the context of the MERGE COMMIT (base + head).
+#   It has read-only access to secrets for PRs from forks.
+#   This is the SAFE default for running untrusted code from forks.
+#
+#   `pull_request_target` runs in the context of the BASE branch and has
+#   full access to secrets. NEVER checkout and run code from the PR head
+#   in a pull_request_target workflow — this is a critical security risk.
+# =============================================================================
+
+name: "02 - Pull Request Trigger"
+
+on:
+  pull_request:
+    # -------------------------------------------------------------------------
+    # Activity Types
+    # -------------------------------------------------------------------------
+    # By default, pull_request triggers on: opened, synchronize, reopened
+    # Specifying `types` overrides the defaults — you must list ALL types
+    # you want, including the defaults if you still need them.
+    types:
+      - opened              # PR was created
+      - synchronize         # New commits pushed to the PR head branch
+      - reopened            # PR was closed and then reopened
+      - edited              # PR title, body, or base branch was changed
+      - labeled             # A label was added to the PR
+      - unlabeled           # A label was removed from the PR
+      - ready_for_review    # PR was moved from draft to ready for review
+      - converted_to_draft  # PR was converted to draft
+      - review_requested    # A review was requested from a user or team
+      # Other available types (not included here to reduce noise):
+      #   - assigned / unassigned
+      #   - locked / unlocked
+      #   - auto_merge_enabled / auto_merge_disabled
+      #   - milestoned / demilestoned
+      #   - enqueued / dequeued (merge queue)
+
+    # -------------------------------------------------------------------------
+    # Branch Filters
+    # -------------------------------------------------------------------------
+    # Filters on the PR's BASE branch (the branch being merged INTO).
+    # This does NOT filter on the head/source branch.
+    branches:
+      - main
+      - develop
+      - 'release/**'
+
+    # -------------------------------------------------------------------------
+    # Path Filters
+    # -------------------------------------------------------------------------
+    # Only trigger when these paths are changed in the PR.
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/02-pull-request-trigger.yml'
+
+# =============================================================================
+# COMMENTED: pull_request_target Security Warning
+# =============================================================================
+# WARNING: pull_request_target is dangerous if misused!
+#
+# on:
+#   pull_request_target:
+#     types: [opened, synchronize]
+#
+# pull_request_target:
+#   - Runs in the context of the BASE branch (not the PR head)
+#   - Has FULL access to repository secrets
+#   - Has WRITE access to the repository
+#   - The checked-out code is from the BASE branch by default
+#
+# NEVER DO THIS (critical security vulnerability):
+#   on: pull_request_target
+#   jobs:
+#     build:
+#       steps:
+#         - uses: actions/checkout@v4
+#           with:
+#             ref: ${{ github.event.pull_request.head.sha }}  # DANGER!
+#         - run: npm install && npm test  # Runs attacker's code with secrets!
+#
+# SAFE PATTERN: Only use pull_request_target for labeling, commenting,
+# or other operations that don't execute code from the PR.
+# =============================================================================
+
+permissions:
+  contents: read
+  pull-requests: read       # Required to read PR details
+  statuses: write           # Required to set commit statuses
+
+jobs:
+  # ===========================================================================
+  # Job: pr-info
+  # ===========================================================================
+  # Displays all available PR context information.
+  # Skips draft PRs to save CI resources.
+  pr-info:
+    name: "PR Information"
+    runs-on: ubuntu-latest
+
+    # -------------------------------------------------------------------------
+    # Skip draft PRs
+    # -------------------------------------------------------------------------
+    # github.event.pull_request.draft is true for draft PRs.
+    # Using `if` at the job level skips the entire job (shows as "skipped").
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - name: Display PR context
+        run: |
+          echo "============================================"
+          echo "  Pull Request Event Context"
+          echo "============================================"
+          echo ""
+          echo "--- Event Details ---"
+          echo "Action:           ${{ github.event.action }}"
+          echo "Event Name:       ${{ github.event_name }}"
+          echo ""
+          echo "--- PR Details ---"
+          echo "PR Number:        ${{ github.event.pull_request.number }}"
+          echo "PR Title:         ${{ github.event.pull_request.title }}"
+          echo "PR State:         ${{ github.event.pull_request.state }}"
+          echo "PR Draft:         ${{ github.event.pull_request.draft }}"
+          echo "PR Mergeable:     ${{ github.event.pull_request.mergeable }}"
+          echo "PR Merged:        ${{ github.event.pull_request.merged }}"
+          echo "PR URL:           ${{ github.event.pull_request.html_url }}"
+          echo ""
+          echo "--- Branches ---"
+          echo "Base Branch:      ${{ github.event.pull_request.base.ref }}"
+          echo "Base SHA:         ${{ github.event.pull_request.base.sha }}"
+          echo "Head Branch:      ${{ github.event.pull_request.head.ref }}"
+          echo "Head SHA:         ${{ github.event.pull_request.head.sha }}"
+          echo "Head Repo:        ${{ github.event.pull_request.head.repo.full_name }}"
+          echo "Is Fork:          ${{ github.event.pull_request.head.repo.fork }}"
+          echo ""
+          echo "--- Author Info ---"
+          echo "PR Author:        ${{ github.event.pull_request.user.login }}"
+          echo "Author Assoc:     ${{ github.event.pull_request.author_association }}"
+          echo ""
+          echo "--- Stats ---"
+          echo "Commits:          ${{ github.event.pull_request.commits }}"
+          echo "Changed Files:    ${{ github.event.pull_request.changed_files }}"
+          echo "Additions:        ${{ github.event.pull_request.additions }}"
+          echo "Deletions:        ${{ github.event.pull_request.deletions }}"
+          echo ""
+          echo "--- Labels ---"
+          echo "Labels:           ${{ toJSON(github.event.pull_request.labels.*.name) }}"
+          echo ""
+          echo "--- Reviewers ---"
+          echo "Requested:        ${{ toJSON(github.event.pull_request.requested_reviewers.*.login) }}"
+          echo "Teams:            ${{ toJSON(github.event.pull_request.requested_teams.*.name) }}"
+
+  # ===========================================================================
+  # Job: build-and-test
+  # ===========================================================================
+  # Standard CI job for PRs — runs on non-draft PRs.
+  build-and-test:
+    name: "Build & Test"
+    runs-on: ubuntu-latest
+
+    # Skip draft PRs
+    if: github.event.pull_request.draft == false
+
+    steps:
+      - name: Checkout PR merge commit
+        uses: actions/checkout@v4
+        # By default, pull_request checks out the merge commit (base + head).
+        # This ensures the build tests the result of merging the PR.
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Run linting
+        run: npm run lint
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run build
+        run: npm run build
+
+  # ===========================================================================
+  # Job: deploy-preview
+  # ===========================================================================
+  # Only runs when the PR has a 'deploy-preview' label.
+  # This demonstrates label-conditional jobs.
+  deploy-preview:
+    name: "Deploy Preview"
+    runs-on: ubuntu-latest
+    needs: build-and-test
+
+    # -------------------------------------------------------------------------
+    # Label-conditional execution
+    # -------------------------------------------------------------------------
+    # contains() checks if the array of label names includes 'deploy-preview'.
+    # This runs on labeled/synchronize events when the label is present.
+    if: |
+      github.event.pull_request.draft == false &&
+      contains(github.event.pull_request.labels.*.name, 'deploy-preview')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy preview environment
+        run: |
+          echo "Deploying preview for PR #${{ github.event.pull_request.number }}..."
+          echo "Preview URL: https://pr-${{ github.event.pull_request.number }}.preview.example.com"
+
+      - name: Comment preview URL on PR
+        # In a real workflow, you would use actions like peter-evans/create-or-update-comment
+        run: |
+          echo "Would comment on PR #${{ github.event.pull_request.number }} with preview URL"
+          echo "Preview deployed successfully!"
+
+  # ===========================================================================
+  # Job: on-label-change
+  # ===========================================================================
+  # Reacts specifically to label changes on the PR.
+  on-label-change:
+    name: "Label Change Handler"
+    runs-on: ubuntu-latest
+
+    # Only run when labels are added or removed
+    if: github.event.action == 'labeled' || github.event.action == 'unlabeled'
+
+    steps:
+      - name: Handle label change
+        run: |
+          echo "Label action: ${{ github.event.action }}"
+          echo "Label name:   ${{ github.event.label.name }}"
+          echo "Label color:  ${{ github.event.label.color }}"
+          echo ""
+          echo "Current PR labels:"
+          echo '${{ toJSON(github.event.pull_request.labels.*.name) }}'
+
+      - name: Check for priority labels
+        run: |
+          LABELS='${{ toJSON(github.event.pull_request.labels.*.name) }}'
+          if echo "$LABELS" | grep -q "priority:high"; then
+            echo "::warning::This PR has been marked as HIGH PRIORITY"
+          fi
+          if echo "$LABELS" | grep -q "do-not-merge"; then
+            echo "::error::This PR is labeled 'do-not-merge' — merging is blocked"
+          fi

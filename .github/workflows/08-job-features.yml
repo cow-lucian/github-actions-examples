@@ -1,0 +1,308 @@
+# =============================================================================
+# 08 - Job Features
+# =============================================================================
+# Demonstrates job-level features in GitHub Actions:
+#   - Job outputs (passing data between jobs)
+#   - needs (job dependencies)
+#   - needs with multiple dependencies
+#   - Conditional jobs using needs context and results
+#   - timeout-minutes (job-level timeout)
+#   - continue-on-error (job-level — don't fail the workflow)
+#   - defaults (shell, working-directory)
+#   - Job-level permissions
+#   - Job-level env vars with step-level overrides
+#
+# Job execution order:
+#   - Jobs run in PARALLEL by default
+#   - Use `needs` to create dependencies and sequential execution
+#   - A job waits for ALL its `needs` jobs to complete before starting
+#   - If a `needs` job fails, dependent jobs are SKIPPED (unless conditional)
+# =============================================================================
+
+name: "08 - Job Features"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Workflow-level env vars — available to all jobs unless overridden
+env:
+  GLOBAL_VAR: "workflow-level"
+  SHARED_CONFIG: "default"
+
+jobs:
+  # ===========================================================================
+  # Job: setup
+  # ===========================================================================
+  # Produces outputs that downstream jobs consume via the needs context.
+  setup:
+    name: "Setup"
+    runs-on: ubuntu-latest
+
+    # -------------------------------------------------------------------------
+    # Job Outputs
+    # -------------------------------------------------------------------------
+    # Outputs make step-level data available to other jobs.
+    # Each output maps a key to a step's output value.
+    outputs:
+      build-version: ${{ steps.version.outputs.version }}
+      build-date: ${{ steps.version.outputs.date }}
+      should-deploy: ${{ steps.check-deploy.outputs.deploy }}
+      matrix-config: ${{ steps.matrix.outputs.config }}
+
+    steps:
+      - name: Determine version
+        id: version
+        run: |
+          VERSION="1.0.${{ github.run_number }}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "Build version: $VERSION"
+
+      - name: Check if deployment is needed
+        id: check-deploy
+        run: |
+          # Simulate deployment check
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Generate dynamic matrix
+        id: matrix
+        run: |
+          # Generate a JSON configuration for a dynamic matrix (used in job 10)
+          echo 'config={"node-version":["18","20","22"],"os":["ubuntu-latest","windows-latest"]}' >> "$GITHUB_OUTPUT"
+
+  # ===========================================================================
+  # Job: build
+  # ===========================================================================
+  # Depends on setup. Demonstrates needs, defaults, job-level env.
+  build:
+    name: "Build (v${{ needs.setup.outputs.build-version }})"
+    runs-on: ubuntu-latest
+
+    # -------------------------------------------------------------------------
+    # needs — declare job dependencies
+    # -------------------------------------------------------------------------
+    # This job will wait for 'setup' to complete before starting.
+    # If 'setup' fails, this job will be SKIPPED.
+    needs: setup
+
+    # -------------------------------------------------------------------------
+    # timeout-minutes — maximum job duration
+    # -------------------------------------------------------------------------
+    # If the job exceeds this time, it will be cancelled.
+    # Default is 360 minutes (6 hours). Set lower to catch hung builds.
+    timeout-minutes: 15
+
+    # -------------------------------------------------------------------------
+    # defaults — default settings for all `run` steps in this job
+    # -------------------------------------------------------------------------
+    defaults:
+      run:
+        shell: bash             # Default shell (bash, sh, pwsh, powershell, cmd, python)
+        working-directory: .    # Default working directory for run steps
+
+    # -------------------------------------------------------------------------
+    # Job-level environment variables
+    # -------------------------------------------------------------------------
+    # These override workflow-level vars and are available to all steps.
+    env:
+      BUILD_VERSION: ${{ needs.setup.outputs.build-version }}
+      BUILD_DATE: ${{ needs.setup.outputs.build-date }}
+      SHARED_CONFIG: "build-override"  # Overrides workflow-level SHARED_CONFIG
+
+    # -------------------------------------------------------------------------
+    # Job-level permissions
+    # -------------------------------------------------------------------------
+    # Override workflow-level permissions for this specific job.
+    # Use principle of least privilege — only request what you need.
+    permissions:
+      contents: read
+      packages: write           # This job needs to push packages
+
+    outputs:
+      artifact-name: ${{ steps.build-step.outputs.artifact }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Show environment variable precedence
+        env:
+          SHARED_CONFIG: "step-override"  # Overrides job-level SHARED_CONFIG
+        run: |
+          echo "=== Environment Variable Precedence ==="
+          echo "GLOBAL_VAR (workflow): $GLOBAL_VAR"
+          echo "BUILD_VERSION (job):   $BUILD_VERSION"
+          echo "SHARED_CONFIG (step):  $SHARED_CONFIG"
+          echo ""
+          echo "Precedence: step > job > workflow"
+          echo ""
+          echo "--- Using env context ---"
+          echo "env.GLOBAL_VAR:    ${{ env.GLOBAL_VAR }}"
+          echo "env.SHARED_CONFIG: ${{ env.SHARED_CONFIG }}"
+
+      - name: Access needs context
+        run: |
+          echo "=== Needs Context ==="
+          echo "Setup job result:  ${{ needs.setup.result }}"
+          echo "Build version:     ${{ needs.setup.outputs.build-version }}"
+          echo "Build date:        ${{ needs.setup.outputs.build-date }}"
+          echo "Should deploy:     ${{ needs.setup.outputs.should-deploy }}"
+
+      - name: Build
+        id: build-step
+        run: |
+          echo "Building version $BUILD_VERSION..."
+          echo "artifact=build-$BUILD_VERSION" >> "$GITHUB_OUTPUT"
+          echo "Build complete!"
+
+  # ===========================================================================
+  # Job: test
+  # ===========================================================================
+  # Also depends on setup. Runs IN PARALLEL with build (both need only setup).
+  test:
+    name: "Test"
+    runs-on: ubuntu-latest
+    needs: setup
+
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          echo "Running tests for version ${{ needs.setup.outputs.build-version }}..."
+          npm test
+
+  # ===========================================================================
+  # Job: integration-tests
+  # ===========================================================================
+  # Depends on MULTIPLE jobs: both build AND test must succeed.
+  integration-tests:
+    name: "Integration Tests"
+    runs-on: ubuntu-latest
+
+    # -------------------------------------------------------------------------
+    # Multiple dependencies
+    # -------------------------------------------------------------------------
+    # This job waits for BOTH build AND test to complete.
+    # If EITHER fails, this job is skipped.
+    needs: [build, test]
+
+    timeout-minutes: 20
+
+    steps:
+      - name: Run integration tests
+        run: |
+          echo "=== Integration Tests ==="
+          echo "Build artifact:  ${{ needs.build.outputs.artifact-name }}"
+          echo "Build result:    ${{ needs.build.result }}"
+          echo "Test result:     ${{ needs.test.result }}"
+          echo ""
+          echo "Both build and test passed — running integration tests..."
+
+  # ===========================================================================
+  # Job: flaky-tests
+  # ===========================================================================
+  # Demonstrates continue-on-error at the job level.
+  flaky-tests:
+    name: "Flaky Tests (non-blocking)"
+    runs-on: ubuntu-latest
+    needs: setup
+
+    # -------------------------------------------------------------------------
+    # continue-on-error (job-level)
+    # -------------------------------------------------------------------------
+    # When true, the workflow continues even if this job fails.
+    # The job result in the needs context will be 'success' even on failure.
+    # The actual result is available in the job's conclusion.
+    # Use this for non-critical jobs that shouldn't block the pipeline.
+    continue-on-error: true
+
+    timeout-minutes: 5
+
+    steps:
+      - name: Run flaky test suite
+        run: |
+          echo "Running flaky tests..."
+          # Simulate a flaky test (50% chance of failure)
+          if [[ $(( RANDOM % 2 )) -eq 0 ]]; then
+            echo "Flaky tests passed this time!"
+          else
+            echo "Flaky tests failed (but workflow continues)"
+            exit 1
+          fi
+
+  # ===========================================================================
+  # Job: deploy
+  # ===========================================================================
+  # Conditional deployment based on needs context results.
+  deploy:
+    name: "Deploy"
+    runs-on: ubuntu-latest
+    needs: [setup, build, test, integration-tests]
+
+    # -------------------------------------------------------------------------
+    # Conditional job execution using needs context
+    # -------------------------------------------------------------------------
+    # Check both the deployment flag AND that all required jobs succeeded.
+    if: |
+      needs.setup.outputs.should-deploy == 'true' &&
+      needs.build.result == 'success' &&
+      needs.test.result == 'success' &&
+      needs.integration-tests.result == 'success'
+
+    steps:
+      - name: Deploy
+        run: |
+          echo "Deploying version ${{ needs.setup.outputs.build-version }}..."
+          echo "All gates passed. Deploying!"
+
+  # ===========================================================================
+  # Job: report
+  # ===========================================================================
+  # Always runs to report the status of all jobs.
+  report:
+    name: "Pipeline Report"
+    runs-on: ubuntu-latest
+    needs: [setup, build, test, integration-tests, flaky-tests, deploy]
+
+    # always() ensures this runs even if upstream jobs fail or are skipped
+    if: always()
+
+    steps:
+      - name: Generate pipeline report
+        run: |
+          echo "## Pipeline Report" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Job | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----|--------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Setup | \`${{ needs.setup.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Build | \`${{ needs.build.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Test | \`${{ needs.test.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Integration Tests | \`${{ needs.integration-tests.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Flaky Tests | \`${{ needs.flaky-tests.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Deploy | \`${{ needs.deploy.result }}\` |" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** \`${{ needs.setup.outputs.build-version }}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check for failures
+        # Fail this job if any critical job failed (but not flaky-tests)
+        run: |
+          if [[ "${{ needs.build.result }}" == "failure" ]] || \
+             [[ "${{ needs.test.result }}" == "failure" ]] || \
+             [[ "${{ needs.integration-tests.result }}" == "failure" ]]; then
+            echo "::error::Critical job(s) failed!"
+            exit 1
+          fi
+          echo "All critical jobs passed."
