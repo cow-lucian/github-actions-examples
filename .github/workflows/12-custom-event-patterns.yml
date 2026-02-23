@@ -1,0 +1,446 @@
+# =============================================================================
+# 12 - Custom Event Patterns & Cross-Workflow Communication
+# =============================================================================
+# SCHOLAR NOTE:
+#   This workflow covers advanced patterns for custom event-driven workflows:
+#   1. repository_dispatch for external system integration
+#   2. workflow_run for chaining workflows
+#   3. Slash commands in issue/PR comments (ChatOps)
+#   4. Cross-repository dispatch patterns
+#   5. Webhook-driven automation
+# =============================================================================
+
+name: "12 - Custom Event Patterns"
+
+on:
+  repository_dispatch:
+    types:
+      - deploy-request
+      - rollback-request
+      - incident-response
+      - config-update
+      - sync-environments
+      - run-migration
+      - purge-cache
+      - scale-service
+      - feature-flag-update
+      - chaos-test
+
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Action to perform"
+        type: choice
+        options:
+          - demo-dispatch-patterns
+          - demo-chatops
+          - demo-workflow-chaining
+        default: demo-dispatch-patterns
+
+  issue_comment:
+    types: [created]
+
+  workflow_run:
+    workflows:
+      - "01 - Push Event Trigger"
+      - "08 - Job Features"
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  deployments: write
+  actions: read
+
+jobs:
+  # ===========================================================================
+  # REPOSITORY_DISPATCH HANDLERS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Deploy Request Handler
+  # ---------------------------------------------------------------------------
+  # Trigger examples:
+  #
+  #   curl -X POST \
+  #     -H "Authorization: token YOUR_PAT" \
+  #     -H "Accept: application/vnd.github+json" \
+  #     https://api.github.com/repos/OWNER/REPO/dispatches \
+  #     -d '{
+  #       "event_type": "deploy-request",
+  #       "client_payload": {
+  #         "environment": "production",
+  #         "version": "v2.1.0",
+  #         "requester": "deploy-bot",
+  #         "reason": "Scheduled release"
+  #       }
+  #     }'
+  #
+  #   gh api repos/OWNER/REPO/dispatches \
+  #     -f event_type=deploy-request \
+  #     -f 'client_payload={"environment":"staging","version":"v2.1.0"}'
+  # ---------------------------------------------------------------------------
+  handle-deploy-request:
+    name: "Handle Deploy Request"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'deploy-request'
+    steps:
+      - name: "Validate deployment payload"
+        id: validate
+        run: |
+          ENVIRONMENT='${{ github.event.client_payload.environment }}'
+          VERSION='${{ github.event.client_payload.version }}'
+          REQUESTER='${{ github.event.client_payload.requester }}'
+          REASON='${{ github.event.client_payload.reason }}'
+
+          ERRORS=""
+          if [ -z "$ENVIRONMENT" ]; then
+            ERRORS="${ERRORS}Missing 'environment' in client_payload. "
+          fi
+          if [ -z "$VERSION" ]; then
+            ERRORS="${ERRORS}Missing 'version' in client_payload. "
+          fi
+
+          if [ -n "$ERRORS" ]; then
+            echo "::error::Validation failed: $ERRORS"
+            exit 1
+          fi
+
+          echo "environment=$ENVIRONMENT" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "requester=${REQUESTER:-unknown}" >> "$GITHUB_OUTPUT"
+          echo "reason=${REASON:-No reason provided}" >> "$GITHUB_OUTPUT"
+
+      - name: "Execute deployment"
+        run: |
+          echo "=== DEPLOYING ==="
+          echo "Environment: ${{ steps.validate.outputs.environment }}"
+          echo "Version: ${{ steps.validate.outputs.version }}"
+          echo "Requested by: ${{ steps.validate.outputs.requester }}"
+          echo "Reason: ${{ steps.validate.outputs.reason }}"
+
+  # ---------------------------------------------------------------------------
+  # Rollback Handler
+  # ---------------------------------------------------------------------------
+  handle-rollback:
+    name: "Handle Rollback Request"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'rollback-request'
+    steps:
+      - name: "Execute rollback"
+        run: |
+          echo "=== ROLLBACK ==="
+          echo "Environment: ${{ github.event.client_payload.environment }}"
+          echo "Rollback to: ${{ github.event.client_payload.target_version }}"
+          echo "Incident: ${{ github.event.client_payload.incident_id }}"
+
+  # ---------------------------------------------------------------------------
+  # Incident Response Handler
+  # ---------------------------------------------------------------------------
+  handle-incident:
+    name: "Handle Incident Response"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'repository_dispatch' && github.event.action == 'incident-response'
+    steps:
+      - name: "Execute incident response playbook"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const payload = context.payload.client_payload;
+            const severity = payload.severity || 'unknown';
+            const service = payload.service || 'unknown';
+            const incidentId = payload.incident_id || 'N/A';
+
+            console.log(`Incident Response Activated:`);
+            console.log(`  Severity: ${severity}`);
+            console.log(`  Service: ${service}`);
+            console.log(`  Incident ID: ${incidentId}`);
+
+            // Create a GitHub issue for tracking
+            const issue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `[INCIDENT-${severity.toUpperCase()}] ${service} - ${incidentId}`,
+              body: [
+                `## Incident Report`,
+                ``,
+                `| Field | Value |`,
+                `| --- | --- |`,
+                `| **Severity** | ${severity} |`,
+                `| **Service** | ${service} |`,
+                `| **Incident ID** | ${incidentId} |`,
+                `| **Description** | ${payload.description || 'No description'} |`,
+                `| **Time** | ${new Date().toISOString()} |`,
+                ``,
+                `## Response Actions`,
+                `- [ ] Acknowledge incident`,
+                `- [ ] Identify root cause`,
+                `- [ ] Apply fix or rollback`,
+                `- [ ] Verify resolution`,
+                `- [ ] Post-mortem scheduled`,
+              ].join('\n'),
+              labels: ['incident', `severity-${severity}`],
+            });
+
+            console.log(`Created incident tracking issue: #${issue.data.number}`);
+
+  # ---------------------------------------------------------------------------
+  # Generic Dispatch Router (catch-all logger)
+  # ---------------------------------------------------------------------------
+  dispatch-router:
+    name: "Dispatch Router"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'repository_dispatch'
+    steps:
+      - name: "Log dispatch event"
+        env:
+          PAYLOAD: ${{ toJSON(github.event.client_payload) }}
+        run: |
+          echo "=== REPOSITORY DISPATCH ==="
+          echo "Event type: ${{ github.event.action }}"
+          echo "Sender: ${{ github.event.sender.login }}"
+          echo "Payload: $PAYLOAD"
+
+  # ===========================================================================
+  # CHATOPS / SLASH COMMAND HANDLERS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Slash Command Router
+  # ---------------------------------------------------------------------------
+  # Supported commands:
+  #   /deploy <env> [version]  - Trigger deployment
+  #   /test [suite]            - Run test suite
+  #   /approve                 - Approve for deployment
+  #   /rollback <env>          - Rollback deployment
+  #   /scale <service> <count> - Scale service
+  #   /help                    - Show available commands
+  # ---------------------------------------------------------------------------
+  chatops-handler:
+    name: "ChatOps Command Handler"
+    runs-on: ubuntu-latest
+    if: >
+      github.event_name == 'issue_comment' &&
+      startsWith(github.event.comment.body, '/')
+    steps:
+      - name: "Parse and execute command"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = context.payload.comment;
+            const body = comment.body.trim();
+            const issueNumber = context.payload.issue.number;
+            const author = comment.user.login;
+            const isPR = !!context.payload.issue.pull_request;
+
+            const parts = body.split(/\s+/);
+            const command = parts[0].toLowerCase();
+            const args = parts.slice(1);
+
+            console.log(`Command: ${command}`);
+            console.log(`Args: ${args.join(', ')}`);
+            console.log(`Author: ${author}`);
+            console.log(`Context: ${isPR ? 'Pull Request' : 'Issue'} #${issueNumber}`);
+
+            let responseBody = '';
+
+            switch (command) {
+              case '/deploy': {
+                const env = args[0] || 'staging';
+                const version = args[1] || 'latest';
+                responseBody = [
+                  `### Deployment Triggered`,
+                  `| Parameter | Value |`,
+                  `| --- | --- |`,
+                  `| **Environment** | ${env} |`,
+                  `| **Version** | ${version} |`,
+                  `| **Triggered by** | @${author} |`,
+                  `| **Status** | Queued |`,
+                ].join('\n');
+                break;
+              }
+
+              case '/test': {
+                const suite = args[0] || 'all';
+                responseBody = `### Test Suite Triggered\nRunning **${suite}** tests... Triggered by @${author}`;
+                break;
+              }
+
+              case '/rollback': {
+                const env = args[0];
+                if (!env) {
+                  responseBody = '**Error:** Usage: `/rollback <environment>`';
+                } else {
+                  responseBody = `### Rollback Initiated\nRolling back **${env}** to previous version...`;
+                }
+                break;
+              }
+
+              case '/scale': {
+                const service = args[0];
+                const count = args[1];
+                if (!service || !count) {
+                  responseBody = '**Error:** Usage: `/scale <service> <count>`';
+                } else {
+                  responseBody = `### Scaling ${service}\nScaling to **${count}** replicas...`;
+                }
+                break;
+              }
+
+              case '/approve': {
+                responseBody = `### Deployment Approved\n@${author} approved this for deployment.`;
+                break;
+              }
+
+              case '/help': {
+                responseBody = [
+                  `### Available ChatOps Commands`,
+                  ``,
+                  `| Command | Description |`,
+                  `| --- | --- |`,
+                  '| `/deploy <env> [version]` | Trigger deployment |',
+                  '| `/test [suite]` | Run test suite |',
+                  '| `/rollback <env>` | Rollback deployment |',
+                  '| `/scale <service> <count>` | Scale service |',
+                  '| `/approve` | Approve for deployment |',
+                  '| `/help` | Show this help message |',
+                ].join('\n');
+                break;
+              }
+
+              default:
+                console.log(`Unknown command: ${command}`);
+                return;
+            }
+
+            if (responseBody) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                body: responseBody,
+              });
+            }
+
+  # ===========================================================================
+  # WORKFLOW_RUN CHAINING PATTERNS
+  # ===========================================================================
+
+  post-workflow:
+    name: "Post-Workflow Handler"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_run'
+    steps:
+      - name: "Process completed workflow"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const workflowRun = context.payload.workflow_run;
+
+            console.log(`Workflow completed:`);
+            console.log(`  Name: ${workflowRun.name}`);
+            console.log(`  Conclusion: ${workflowRun.conclusion}`);
+            console.log(`  Branch: ${workflowRun.head_branch}`);
+            console.log(`  SHA: ${workflowRun.head_sha}`);
+            console.log(`  Run ID: ${workflowRun.id}`);
+            console.log(`  URL: ${workflowRun.html_url}`);
+
+            // Download artifacts from the completed workflow
+            const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: workflowRun.id,
+            });
+
+            console.log(`\nArtifacts from triggering workflow:`);
+            for (const artifact of artifacts.data.artifacts) {
+              console.log(`  - ${artifact.name} (${artifact.size_in_bytes} bytes)`);
+            }
+
+            if (workflowRun.conclusion === 'failure') {
+              console.log('\nWorkflow failed! Could send alert notification.');
+            }
+
+            if (workflowRun.conclusion === 'success' && workflowRun.head_branch === 'main') {
+              console.log('\nMain branch CI passed! Could trigger deployment.');
+            }
+
+  # ===========================================================================
+  # CROSS-REPOSITORY DISPATCH PATTERNS (documentation)
+  # ===========================================================================
+
+  cross-repo-patterns:
+    name: "Cross-Repo Dispatch Patterns"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.action == 'demo-dispatch-patterns'
+    steps:
+      - name: "Document cross-repo patterns"
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          ## Cross-Repository Event Patterns
+
+          ### Pattern 1: Repo A triggers Repo B
+          ```yaml
+          - name: Notify dependent repo
+            run: |
+              curl -X POST \
+                -H "Authorization: token ${{ secrets.CROSS_REPO_PAT }}" \
+                -H "Accept: application/vnd.github+json" \
+                https://api.github.com/repos/org/repo-b/dispatches \
+                -d '{"event_type": "upstream-deployed", "client_payload": {"version": "v1.2.3"}}'
+          ```
+
+          > **IMPORTANT:** `GITHUB_TOKEN` cannot trigger `repository_dispatch`
+          > in another repository. You must use a PAT or GitHub App token.
+
+          ### Pattern 2: Fan-out to Multiple Repos
+          ```yaml
+          - name: Notify all dependent services
+            run: |
+              REPOS=("service-a" "service-b" "service-c")
+              for repo in "${REPOS[@]}"; do
+                curl -X POST \
+                  -H "Authorization: token ${{ secrets.CROSS_REPO_PAT }}" \
+                  https://api.github.com/repos/org/$repo/dispatches \
+                  -d '{"event_type": "dependency-updated"}'
+              done
+          ```
+
+          ### Pattern 3: Using peter-evans/repository-dispatch Action
+          ```yaml
+          - uses: peter-evans/repository-dispatch@v3
+            with:
+              token: ${{ secrets.CROSS_REPO_PAT }}
+              repository: org/other-repo
+              event-type: deploy-request
+              client-payload: '{"ref": "${{ github.ref }}", "sha": "${{ github.sha }}"}'
+          ```
+
+          ### Pattern 4: GitHub App Token (Recommended for Production)
+          ```yaml
+          - name: Generate App Token
+            id: app-token
+            uses: actions/create-github-app-token@v1
+            with:
+              app-id: ${{ secrets.APP_ID }}
+              private-key: ${{ secrets.APP_PRIVATE_KEY }}
+              repositories: 'repo-b,repo-c'
+
+          - name: Dispatch with App token
+            run: |
+              curl -X POST \
+                -H "Authorization: token ${{ steps.app-token.outputs.token }}" \
+                https://api.github.com/repos/org/repo-b/dispatches \
+                -d '{"event_type": "deploy"}'
+          ```
+
+          ### Authentication Comparison for repository_dispatch
+          | Auth Method | Cross-Repo | Expires | Best For |
+          |-------------|------------|---------|----------|
+          | `GITHUB_TOKEN` | No | Job end | Same-repo only |
+          | PAT (classic) | Yes | Manual | Personal/testing |
+          | PAT (fine-grained) | Yes | Configurable | Scoped access |
+          | GitHub App Token | Yes | 1 hour | Production |
+          EOF

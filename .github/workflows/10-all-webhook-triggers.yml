@@ -1,0 +1,634 @@
+# =============================================================================
+# 10 - Complete Webhook Event Triggers Catalog
+# =============================================================================
+# GitHub Actions supports 35+ webhook events. This file is an exhaustive
+# reference of EVERY trigger available, organized by category.
+#
+# SCHOLAR NOTE:
+#   Not all events are commonly used. This catalog serves as a reference
+#   so you know what's possible. Each event lists its activity types
+#   (sub-events) and the context fields available.
+#
+# EVENT CATEGORIES:
+#   1. Code & Repository events
+#   2. Pull Request events
+#   3. Issue & Discussion events
+#   4. CI/CD & Deployment events
+#   5. Branch & Tag lifecycle events
+#   6. Collaboration events
+#   7. GitHub Packages & Registry events
+#   8. Organization & Security events
+# =============================================================================
+
+name: "10 - Complete Webhook Triggers Catalog"
+
+# ---------------------------------------------------------------------------
+# COMPLETE EVENT REFERENCE (all events listed, with commentary)
+# ---------------------------------------------------------------------------
+#
+# === CODE & REPOSITORY EVENTS ===
+# push:                Code pushed to a branch or tag
+# create:              Branch or tag created
+# delete:              Branch or tag deleted
+# fork:                Repository forked
+# watch:               Repository starred (activity type: started)
+# public:              Repository changed from private to public
+# gollum:              Wiki page created or updated
+# page_build:          GitHub Pages build completed
+# status:              Commit status updated (from external CI systems)
+#
+# === PULL REQUEST EVENTS ===
+# pull_request:           PR opened, closed, merged, edited, etc.
+# pull_request_review:    PR review submitted, edited, dismissed
+# pull_request_review_comment: Comment on a PR diff
+# pull_request_target:    Like pull_request but runs in BASE branch context
+# merge_group:            PR added to merge queue
+#
+# === ISSUE & DISCUSSION EVENTS ===
+# issues:              Issue opened, closed, labeled, etc.
+# issue_comment:       Comment on an issue or PR
+# discussion:          GitHub Discussions created, answered, etc.
+# discussion_comment:  Comment on a discussion
+# label:               Label created, edited, deleted
+# milestone:           Milestone created, opened, closed, etc.
+# project:             Project board created, updated, closed, etc.
+# project_card:        Card added, moved, deleted in a project board
+# project_column:      Column created, updated, deleted in a project board
+#
+# === CI/CD & DEPLOYMENT EVENTS ===
+# workflow_dispatch:    Manual trigger via UI/API
+# workflow_run:         Another workflow completed
+# workflow_call:        Called as a reusable workflow
+# repository_dispatch:  External system trigger via API
+# check_run:            Check run created, completed (from GitHub Apps)
+# check_suite:          Check suite created, completed
+# deployment:           Deployment created
+# deployment_status:    Deployment status changed
+# schedule:             Cron-based trigger
+#
+# === COLLABORATION EVENTS ===
+# member:              Collaborator added/removed
+# team_add:            Team added to repository
+# release:             Release published, created, edited, etc.
+# registry_package:    Package published/updated in GitHub Packages
+#
+# === SECURITY EVENTS ===
+# branch_protection_rule:  Branch protection rule created/edited/deleted
+# code_scanning_alert:     Code scanning alert (from CodeQL, etc.)
+# dependabot_alert:        Dependabot vulnerability alert
+# secret_scanning_alert:   Secret scanning alert
+# ---------------------------------------------------------------------------
+
+on:
+  # We use workflow_dispatch as the primary trigger for testing
+  workflow_dispatch:
+    inputs:
+      demo-event:
+        description: "Which event category to demonstrate"
+        type: choice
+        options:
+          - all
+          - code-events
+          - pr-events
+          - issue-events
+          - cicd-events
+          - collab-events
+          - security-events
+        default: all
+
+  # === CODE & REPOSITORY EVENTS ===
+
+  # GOLLUM: Wiki page events
+  # Fires when a wiki page is created or updated.
+  # No activity types - fires on any wiki change.
+  gollum:
+
+  # PUBLIC: Repository visibility change
+  # Fires when a private repository is made public.
+  # No activity types.
+  public:
+
+  # PAGE_BUILD: GitHub Pages build events
+  # Fires when a GitHub Pages site is built.
+  page_build:
+
+  # STATUS: Commit status events (older Commit Status API, not Check Runs)
+  status:
+
+  # === PULL REQUEST REVIEW EVENTS ===
+
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+
+  # MERGE_GROUP: Merge queue events
+  # Requires merge queue to be enabled in branch protection.
+  merge_group:
+    types: [checks_requested]
+
+  # === ISSUE & DISCUSSION EVENTS ===
+
+  discussion:
+    types:
+      - created
+      - edited
+      - deleted
+      - transferred
+      - pinned
+      - unpinned
+      - labeled
+      - unlabeled
+      - locked
+      - unlocked
+      - category_changed
+      - answered
+      - unanswered
+
+  discussion_comment:
+    types: [created, edited, deleted]
+
+  label:
+    types: [created, edited, deleted]
+
+  milestone:
+    types: [created, opened, closed, edited, deleted]
+
+  project:
+    types: [created, updated, closed, reopened, edited, deleted]
+
+  project_card:
+    types: [created, moved, converted, edited, deleted]
+
+  project_column:
+    types: [created, updated, moved, deleted]
+
+  # === CI/CD & DEPLOYMENT EVENTS ===
+
+  check_run:
+    types: [created, rerequested, completed, requested_action]
+
+  check_suite:
+    types: [completed, requested, rerequested]
+
+  deployment:
+
+  deployment_status:
+
+  # === COLLABORATION EVENTS ===
+
+  member:
+    types: [added, removed, edited]
+
+  team_add:
+
+  registry_package:
+    types: [published, updated]
+
+  # === SECURITY EVENTS ===
+
+  branch_protection_rule:
+    types: [created, edited, deleted]
+
+  # Requires GitHub Advanced Security:
+  # code_scanning_alert:
+  #   types: [created, reopened, closed, fixed, appeared_in_branch]
+  # dependabot_alert:
+  #   types: [created, dismissed, fixed, reintroduced, auto_dismissed]
+  # secret_scanning_alert:
+  #   types: [created, resolved, reopened]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  discussions: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Universal Event Logger
+  # ---------------------------------------------------------------------------
+  event-logger:
+    name: "Log Event: ${{ github.event_name }}"
+    runs-on: ubuntu-latest
+    steps:
+      - name: "Display event information"
+        run: |
+          echo "=== EVENT INFORMATION ==="
+          echo "Event name:     ${{ github.event_name }}"
+          echo "Event action:   ${{ github.event.action }}"
+          echo "Actor:          ${{ github.actor }}"
+          echo "Repository:     ${{ github.repository }}"
+          echo "Ref:            ${{ github.ref }}"
+          echo "SHA:            ${{ github.sha }}"
+          echo "Workflow:       ${{ github.workflow }}"
+          echo "Run ID:         ${{ github.run_id }}"
+          echo "Run number:     ${{ github.run_number }}"
+          echo "Run attempt:    ${{ github.run_attempt }}"
+
+      - name: "Display full event payload"
+        env:
+          EVENT_PAYLOAD: ${{ toJSON(github.event) }}
+        run: |
+          echo '=== FULL EVENT PAYLOAD ==='
+          echo "$EVENT_PAYLOAD" | jq '.' || echo "$EVENT_PAYLOAD"
+
+  # ---------------------------------------------------------------------------
+  # Wiki (Gollum) Event Handler
+  # ---------------------------------------------------------------------------
+  on-wiki-change:
+    name: "Handle Wiki Change"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'gollum'
+    steps:
+      - name: "Process wiki pages"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // The gollum event payload includes an array of pages
+            const pages = context.payload.pages || [];
+
+            console.log(`Wiki event: ${pages.length} page(s) modified`);
+
+            for (const page of pages) {
+              console.log(`  Page: ${page.page_name}`);
+              console.log(`  Title: ${page.title}`);
+              console.log(`  Action: ${page.action}`);  // created, edited
+              console.log(`  URL: ${page.html_url}`);
+              console.log(`  SHA: ${page.sha}`);
+              console.log('---');
+            }
+
+  # ---------------------------------------------------------------------------
+  # Discussion Event Handler
+  # ---------------------------------------------------------------------------
+  on-discussion:
+    name: "Handle Discussion"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'discussion'
+    steps:
+      - name: "Process discussion event"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const discussion = context.payload.discussion;
+            const action = context.payload.action;
+
+            console.log(`Discussion ${action}:`);
+            console.log(`  Title: ${discussion.title}`);
+            console.log(`  Number: ${discussion.number}`);
+            console.log(`  Category: ${discussion.category?.name}`);
+            console.log(`  Author: ${discussion.user?.login}`);
+            console.log(`  URL: ${discussion.html_url}`);
+            console.log(`  Answered: ${discussion.answer_html_url ? 'Yes' : 'No'}`);
+
+            if (action === 'created') {
+              console.log('New discussion created - could auto-label or notify team');
+            }
+
+            if (action === 'answered') {
+              console.log('Discussion was answered - could close related issues');
+            }
+
+  # ---------------------------------------------------------------------------
+  # Discussion Comment Handler
+  # ---------------------------------------------------------------------------
+  on-discussion-comment:
+    name: "Handle Discussion Comment"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'discussion_comment'
+    steps:
+      - name: "Process discussion comment"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = context.payload.comment;
+            const discussion = context.payload.discussion;
+
+            console.log(`Discussion comment ${context.payload.action}:`);
+            console.log(`  Discussion: #${discussion.number} - ${discussion.title}`);
+            console.log(`  Comment by: ${comment.user?.login}`);
+            console.log(`  Comment URL: ${comment.html_url}`);
+
+  # ---------------------------------------------------------------------------
+  # Label Lifecycle Handler
+  # ---------------------------------------------------------------------------
+  on-label-change:
+    name: "Handle Label Change"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'label'
+    steps:
+      - name: "Process label event"
+        run: |
+          echo "Label ${{ github.event.action }}:"
+          echo "  Name: ${{ github.event.label.name }}"
+          echo "  Color: #${{ github.event.label.color }}"
+          echo "  Description: ${{ github.event.label.description }}"
+
+  # ---------------------------------------------------------------------------
+  # Milestone Handler
+  # ---------------------------------------------------------------------------
+  on-milestone:
+    name: "Handle Milestone"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'milestone'
+    steps:
+      - name: "Process milestone event"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const milestone = context.payload.milestone;
+            const action = context.payload.action;
+
+            console.log(`Milestone ${action}:`);
+            console.log(`  Title: ${milestone.title}`);
+            console.log(`  Number: ${milestone.number}`);
+            console.log(`  State: ${milestone.state}`);
+            console.log(`  Open issues: ${milestone.open_issues}`);
+            console.log(`  Closed issues: ${milestone.closed_issues}`);
+            console.log(`  Due on: ${milestone.due_on || 'No due date'}`);
+
+            if (action === 'closed') {
+              const totalIssues = milestone.open_issues + milestone.closed_issues;
+              const completionRate = totalIssues > 0
+                ? ((milestone.closed_issues / totalIssues) * 100).toFixed(1)
+                : '100.0';
+              console.log(`Milestone completed: ${completionRate}% of issues closed`);
+            }
+
+  # ---------------------------------------------------------------------------
+  # Pull Request Review Handler
+  # ---------------------------------------------------------------------------
+  on-pr-review:
+    name: "Handle PR Review"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request_review'
+    steps:
+      - name: "Process PR review"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const review = context.payload.review;
+            const pr = context.payload.pull_request;
+
+            console.log(`PR Review ${context.payload.action}:`);
+            console.log(`  PR: #${pr.number} - ${pr.title}`);
+            console.log(`  Reviewer: ${review.user?.login}`);
+            console.log(`  State: ${review.state}`);
+            console.log(`  Body: ${review.body || '(no comment)'}`);
+
+            if (review.state === 'approved') {
+              console.log('PR approved! Could check if all required approvals are met.');
+            }
+
+            if (review.state === 'changes_requested') {
+              console.log('Changes requested. Could add a label or notify the author.');
+            }
+
+  # ---------------------------------------------------------------------------
+  # Check Run / Check Suite Handler
+  # ---------------------------------------------------------------------------
+  on-check-events:
+    name: "Handle Check Events"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'check_run' || github.event_name == 'check_suite'
+    steps:
+      - name: "Process check event"
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "Action: ${{ github.event.action }}"
+
+          # check_run fields:
+          # - github.event.check_run.name
+          # - github.event.check_run.status (queued, in_progress, completed)
+          # - github.event.check_run.conclusion (success, failure, neutral, etc.)
+          # - github.event.check_run.head_sha
+          # - github.event.check_run.app.name
+
+          # check_suite fields:
+          # - github.event.check_suite.head_branch
+          # - github.event.check_suite.status
+          # - github.event.check_suite.conclusion
+
+  # ---------------------------------------------------------------------------
+  # Deployment Event Handler
+  # ---------------------------------------------------------------------------
+  on-deployment:
+    name: "Handle Deployment Events"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'deployment' || github.event_name == 'deployment_status'
+    steps:
+      - name: "Process deployment event"
+        run: |
+          echo "Event: ${{ github.event_name }}"
+
+          if [ "${{ github.event_name }}" = "deployment" ]; then
+            echo "=== DEPLOYMENT CREATED ==="
+            echo "Environment: ${{ github.event.deployment.environment }}"
+            echo "Ref: ${{ github.event.deployment.ref }}"
+            echo "SHA: ${{ github.event.deployment.sha }}"
+            echo "Creator: ${{ github.event.deployment.creator.login }}"
+            echo "Description: ${{ github.event.deployment.description }}"
+          fi
+
+          if [ "${{ github.event_name }}" = "deployment_status" ]; then
+            echo "=== DEPLOYMENT STATUS CHANGED ==="
+            echo "State: ${{ github.event.deployment_status.state }}"
+            echo "Environment: ${{ github.event.deployment_status.environment }}"
+            echo "Target URL: ${{ github.event.deployment_status.target_url }}"
+            # States: error, failure, inactive, in_progress, queued, pending, success
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Branch Protection Rule Handler
+  # ---------------------------------------------------------------------------
+  on-branch-protection:
+    name: "Handle Branch Protection Changes"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'branch_protection_rule'
+    steps:
+      - name: "Audit branch protection change"
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const rule = context.payload.rule;
+            const action = context.payload.action;
+
+            console.log(`Branch protection rule ${action}:`);
+            console.log(`  Pattern: ${rule.pattern}`);
+            console.log(`  Enforcement: ${rule.enforcement}`);
+            console.log(`  Require PR: ${rule.requires_pull_request}`);
+            console.log(`  Required approvals: ${rule.required_approving_review_count}`);
+            console.log(`  Dismiss stale reviews: ${rule.dismisses_stale_reviews}`);
+            console.log(`  Require status checks: ${rule.requires_status_checks}`);
+            console.log(`  Require signed commits: ${rule.requires_commit_signatures}`);
+
+  # ---------------------------------------------------------------------------
+  # Member (Collaborator) Handler
+  # ---------------------------------------------------------------------------
+  on-member:
+    name: "Handle Collaborator Changes"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'member'
+    steps:
+      - name: "Audit collaborator change"
+        run: |
+          echo "Member ${{ github.event.action }}:"
+          echo "  User: ${{ github.event.member.login }}"
+          echo "  Changed by: ${{ github.actor }}"
+
+  # ---------------------------------------------------------------------------
+  # Registry Package Handler
+  # ---------------------------------------------------------------------------
+  on-package:
+    name: "Handle Package Events"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'registry_package'
+    steps:
+      - name: "Process package event"
+        run: |
+          echo "Package ${{ github.event.action }}:"
+          echo "  Name: ${{ github.event.registry_package.name }}"
+          echo "  Type: ${{ github.event.registry_package.package_type }}"
+
+  # ---------------------------------------------------------------------------
+  # Merge Queue Handler
+  # ---------------------------------------------------------------------------
+  on-merge-group:
+    name: "Handle Merge Queue"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'merge_group'
+    steps:
+      - name: Checkout merge group ref
+        uses: actions/checkout@v4
+
+      - name: "Run merge queue checks"
+        run: |
+          echo "Merge group event:"
+          echo "  Action: ${{ github.event.action }}"
+          echo "  Head ref: ${{ github.event.merge_group.head_ref }}"
+          echo "  Head SHA: ${{ github.event.merge_group.head_sha }}"
+          echo "  Base ref: ${{ github.event.merge_group.base_ref }}"
+          echo "  Base SHA: ${{ github.event.merge_group.base_sha }}"
+          echo ""
+          echo "Running full CI suite for merge queue validation..."
+
+  # ---------------------------------------------------------------------------
+  # Page Build Handler
+  # ---------------------------------------------------------------------------
+  on-page-build:
+    name: "Handle GitHub Pages Build"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'page_build'
+    steps:
+      - name: "Process pages build"
+        run: |
+          echo "GitHub Pages build event:"
+          echo "  Status: ${{ github.event.build.status }}"
+          echo "  Error: ${{ github.event.build.error.message }}"
+          echo "  Duration: ${{ github.event.build.duration }}ms"
+          echo "  Pusher: ${{ github.event.build.pusher.login }}"
+
+  # ---------------------------------------------------------------------------
+  # Status Event Handler (Commit Status API)
+  # ---------------------------------------------------------------------------
+  on-status:
+    name: "Handle Commit Status"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'status'
+    steps:
+      - name: "Process commit status"
+        run: |
+          echo "Commit status event:"
+          echo "  State: ${{ github.event.state }}"
+          echo "  Context: ${{ github.event.context }}"
+          echo "  Description: ${{ github.event.description }}"
+          echo "  Target URL: ${{ github.event.target_url }}"
+          echo "  Commit SHA: ${{ github.event.sha }}"
+          # States: pending, success, failure, error
+
+  # ---------------------------------------------------------------------------
+  # Summary: Quick Reference Table (only on manual trigger)
+  # ---------------------------------------------------------------------------
+  trigger-reference:
+    name: "Generate Trigger Reference"
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: "Output trigger reference table"
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << 'EOF'
+          # GitHub Actions - Complete Trigger Reference
+
+          ## Code & Repository Events
+          | Event | Activity Types | Description |
+          |-------|---------------|-------------|
+          | `push` | _(none)_ | Code pushed to branch/tag |
+          | `create` | _(none)_ | Branch or tag created |
+          | `delete` | _(none)_ | Branch or tag deleted |
+          | `fork` | _(none)_ | Repository forked |
+          | `gollum` | _(none)_ | Wiki page created/updated |
+          | `public` | _(none)_ | Repo made public |
+          | `watch` | `started` | Repository starred |
+          | `page_build` | _(none)_ | GitHub Pages built |
+          | `status` | _(none)_ | Commit status updated |
+
+          ## Pull Request Events
+          | Event | Activity Types | Description |
+          |-------|---------------|-------------|
+          | `pull_request` | `opened`, `synchronize`, `reopened`, `closed`, `edited`, `labeled`, `unlabeled`, `ready_for_review`, `converted_to_draft`, `review_requested`, `review_request_removed`, `auto_merge_enabled`, `auto_merge_disabled`, `assigned`, `unassigned`, `locked`, `unlocked`, `milestoned`, `demilestoned`, `enqueued`, `dequeued` | PR lifecycle |
+          | `pull_request_target` | _(same as pull_request)_ | Runs in base branch context |
+          | `pull_request_review` | `submitted`, `edited`, `dismissed` | PR review events |
+          | `pull_request_review_comment` | `created`, `edited`, `deleted` | Diff comment events |
+          | `merge_group` | `checks_requested` | Merge queue events |
+
+          ## Issue & Discussion Events
+          | Event | Activity Types | Description |
+          |-------|---------------|-------------|
+          | `issues` | `opened`, `edited`, `deleted`, `transferred`, `pinned`, `unpinned`, `closed`, `reopened`, `assigned`, `unassigned`, `labeled`, `unlabeled`, `locked`, `unlocked`, `milestoned`, `demilestoned` | Issue lifecycle |
+          | `issue_comment` | `created`, `edited`, `deleted` | Issue/PR comments |
+          | `discussion` | `created`, `edited`, `deleted`, `transferred`, `pinned`, `unpinned`, `labeled`, `unlabeled`, `locked`, `unlocked`, `category_changed`, `answered`, `unanswered` | Discussion lifecycle |
+          | `discussion_comment` | `created`, `edited`, `deleted` | Discussion comments |
+          | `label` | `created`, `edited`, `deleted` | Label management |
+          | `milestone` | `created`, `opened`, `closed`, `edited`, `deleted` | Milestone lifecycle |
+
+          ## CI/CD & Deployment Events
+          | Event | Activity Types | Description |
+          |-------|---------------|-------------|
+          | `workflow_dispatch` | _(none)_ | Manual trigger |
+          | `workflow_run` | `completed`, `requested`, `in_progress` | Workflow lifecycle |
+          | `workflow_call` | _(none)_ | Reusable workflow |
+          | `repository_dispatch` | _(custom types)_ | External trigger |
+          | `schedule` | _(cron expressions)_ | Scheduled trigger |
+          | `check_run` | `created`, `rerequested`, `completed`, `requested_action` | Check run lifecycle |
+          | `check_suite` | `completed`, `requested`, `rerequested` | Check suite lifecycle |
+          | `deployment` | _(none)_ | Deployment created |
+          | `deployment_status` | _(none)_ | Deployment status changed |
+
+          ## Collaboration Events
+          | Event | Activity Types | Description |
+          |-------|---------------|-------------|
+          | `member` | `added`, `removed`, `edited` | Collaborator changes |
+          | `team_add` | _(none)_ | Team added to repo |
+          | `release` | `published`, `unpublished`, `created`, `edited`, `deleted`, `prereleased`, `released` | Release lifecycle |
+          | `registry_package` | `published`, `updated` | Package registry |
+
+          ## Security Events
+          | Event | Activity Types | Description |
+          |-------|---------------|-------------|
+          | `branch_protection_rule` | `created`, `edited`, `deleted` | Branch protection |
+          | `code_scanning_alert` | `created`, `reopened`, `closed`, `fixed`, `appeared_in_branch` | Code scanning |
+          | `dependabot_alert` | `created`, `dismissed`, `fixed`, `reintroduced`, `auto_dismissed` | Dependabot alerts |
+          | `secret_scanning_alert` | `created`, `resolved`, `reopened` | Secret scanning |
+
+          ## Filters Available Per Trigger
+          | Filter | Supported By | Description |
+          |--------|-------------|-------------|
+          | `branches` / `branches-ignore` | `push`, `pull_request`, `pull_request_target`, `merge_group` | Branch name filter |
+          | `tags` / `tags-ignore` | `push` | Tag name filter |
+          | `paths` / `paths-ignore` | `push`, `pull_request`, `pull_request_target` | File path filter |
+          | `types` | Most webhook events | Activity type filter |
+
+          > **Note:** `branches`/`branches-ignore` and `paths`/`paths-ignore` are mutually exclusive pairs.
+          EOF
